@@ -246,9 +246,10 @@ fn main() {
 }
 
 async fn check_forge(mc_dir: &PathBuf, java_path: &PathBuf) -> Result<String, TauriError> {
+  let versions_dir = mc_dir.join("versions");
+  // TODO: if it not exists, perform installation
   let forge_folder_re = Regex::new(&format!("{}.+{}", MINECRAFT_FORGE_VERSION.0, MINECRAFT_FORGE_VERSION.1)).unwrap();
-  let forge_version_name = mc_dir
-    .join("versions")
+  let forge_version_name = versions_dir
     .read_dir()?
     .into_iter()
     .filter_map(|dir| dir.ok())
