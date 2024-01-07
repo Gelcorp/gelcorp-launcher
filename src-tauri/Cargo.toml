@@ -1,5 +1,5 @@
 [package]
-name = "minecraft-launcher"
+name = "gelcorp-launcher"
 version = "1.0.0"
 description = "Gelcorp Launcher"
 authors = ["MonkeyKiller"]
@@ -31,8 +31,8 @@ derive_builder = "0.12.0"
 zip = "0.6.6"
 os_info = "3.7.0"
 async-recursion = "1.0.5"
-forge-downloader = { path = "../../forge-downloader" }
-minecraft-launcher-core = { path = "../../minecraft-launcher-core" } # { git = "ssh://git@github.com/MMonkeyKiller/mclc-rust.git"}
+forge-downloader = { git = "https://github.com/Gelcorp/forge-downloader.git" } # { path = "../../forge-downloader" }
+minecraft-launcher-core = { git = "https://github.com/Gelcorp/minecraft-launcher-core.git" } # { path = "../../minecraft-launcher-core" }
 log4rs = "1.2.0"
 log = "0.4.20"
 anyhow = "1.0.79"

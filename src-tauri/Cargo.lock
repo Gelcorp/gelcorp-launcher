@@ -932,6 +932,7 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 [[package]]
 name = "forge-downloader"
 version = "0.1.0"
+source = "git+https://github.com/Gelcorp/forge-downloader.git#76184d6f4a26f8f7461aef997768d94844a325c1"
 dependencies = [
  "chrono",
  "futures",
@@ -1148,6 +1149,37 @@ dependencies = [
  "libc",
  "system-deps 6.2.0",
  "x11",
+]
+
+[[package]]
+name = "gelcorp-launcher"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "async-recursion",
+ "chrono",
+ "derive_builder",
+ "forge-downloader",
+ "futures",
+ "hex",
+ "log",
+ "log4rs",
+ "minecraft-launcher-core",
+ "minecraft-msa-auth",
+ "oauth2",
+ "once_cell",
+ "os_info",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tauri",
+ "tauri-build",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "zip",
 ]
 
 [[package]]
@@ -2049,39 +2081,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
-name = "minecraft-launcher"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "async-recursion",
- "chrono",
- "derive_builder",
- "forge-downloader",
- "futures",
- "hex",
- "log",
- "log4rs",
- "minecraft-launcher-core",
- "minecraft-msa-auth",
- "oauth2",
- "once_cell",
- "os_info",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sha1",
- "tauri",
- "tauri-build",
- "thiserror",
- "tokio",
- "uuid",
- "zip",
-]
-
-[[package]]
 name = "minecraft-launcher-core"
 version = "0.1.0"
+source = "git+https://github.com/Gelcorp/minecraft-launcher-core.git#fbbb14cf3024876bf64b35692db984dffd862b3d"
 dependencies = [
  "anyhow",
  "async-recursion",
