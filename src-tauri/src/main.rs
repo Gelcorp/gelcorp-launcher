@@ -3,15 +3,16 @@
 
 mod msa_auth;
 mod logger;
+mod java;
 
 use std::{ path::{ PathBuf, Path }, env::{ self, temp_dir }, io::BufRead, sync::{ Arc, Mutex }, fs, thread::{ self, sleep }, time::Duration };
 
-use forge_downloader::{ forge_client_install::ForgeClientInstall, download_utils::forge::{ ForgeVersionHandler, ForgeVersionInfo } };
+use forge_downloader::{ forge_client_install::ForgeClientInstall, download_utils::forge::ForgeVersionHandler };
 use log::{ info, LevelFilter, debug };
 use log4rs::{ config::{ Appender, Root, Config }, append::console::ConsoleAppender, encode::pattern::PatternEncoder, filter };
 use minecraft_launcher_core::{
-  options::{ GameOptionsBuilder, LauncherOptions, MinecraftFeatureMatcher },
-  versions::{ info::MCVersion, VersionManager },
+  options::{ GameOptionsBuilder, LauncherOptions },
+  versions::info::MCVersion,
   profile_manager::auth::{ CommonUserAuthentication, UserAuthentication },
   MinecraftGameRunner,
 };
@@ -24,7 +25,7 @@ use tauri::{ Window, Manager };
 
 use thiserror::Error;
 
-use crate::logger::LauncherAppender;
+use crate::{ logger::LauncherAppender, java::{ download_java, check_java_dir } };
 
 static LAUNCHER_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
 static GAME_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
@@ -105,19 +106,25 @@ impl Serialize for TauriError {
 }
 
 #[tauri::command]
-async fn start_game(state: tauri::State<'_, LauncherConfig>, window: Window, mc_dir: String, java_path: String) -> Result<(), TauriError>
-  where Window: Sync
-{
+async fn start_game(state: tauri::State<'_, LauncherConfig>, window: Window, mc_dir: String) -> Result<(), TauriError> where Window: Sync {
   let window = Arc::new(window);
   info!("Attempting to launch the game...");
 
   let mc_dir = sanitize_path_buf(PathBuf::from(mc_dir));
-  let java_path = sanitize_path_buf(PathBuf::from(java_path));
+  let java_path = mc_dir.join("jre-runtime");
+  let java_executable_path = java_path.join("bin").join("java.exe");
   info!(" \\--Game Version: {:?}", &MINECRAFT_FORGE_VERSION);
   info!(" \\--MC Directory: {}", &mc_dir.to_str().unwrap());
   info!(" \\--Java Path: {}", &java_path.to_str().unwrap());
 
-  let forge_version_name = check_forge(&mc_dir, &java_path).await?;
+  debug!("Checking java runtime...");
+  if !check_java_dir(&java_path) {
+    info!("Java runtime not found. Downloading...");
+    download_java(&java_path, "17").await.map_err(|err| TauriError::Other(format!("Failed to download java: {}", err)))?;
+    info!("Java downloaded successfully!");
+  }
+
+  let forge_version_name = check_forge(&mc_dir, &java_executable_path).await?;
   info!("Forge Version: {}", &forge_version_name);
 
   info!("Logging in to MSA...");
@@ -149,7 +156,7 @@ async fn start_game(state: tauri::State<'_, LauncherConfig>, window: Window, mc_
 
   let game_opts = GameOptionsBuilder::default()
     .game_dir(mc_dir)
-    .java_path(java_path)
+    .java_path(java_executable_path)
     .version(MCVersion::from(forge_version_name))
     .launcher_options(LauncherOptions::new(LAUNCHER_NAME, LAUNCHER_VERSION))
     .authentication(Box::new(auth))
@@ -247,35 +254,36 @@ fn main() {
 
 async fn check_forge(mc_dir: &PathBuf, java_path: &PathBuf) -> Result<String, TauriError> {
   let versions_dir = mc_dir.join("versions");
-  // TODO: if it not exists, perform installation
-  let forge_folder_re = Regex::new(&format!("{}.+{}", MINECRAFT_FORGE_VERSION.0, MINECRAFT_FORGE_VERSION.1)).unwrap();
-  let forge_version_name = versions_dir
-    .read_dir()?
-    .into_iter()
-    .filter_map(|dir| dir.ok())
-    .filter_map(|dir| dir.file_name().into_string().ok())
-    .find(|name| forge_folder_re.is_match(name));
-  if let Some(name) = forge_version_name {
-    Ok(name)
-  } else {
-    let forge_version_handler = ForgeVersionHandler::new().await?;
-    let forge_version = forge_version_handler.get_by_forge_version(&MINECRAFT_FORGE_VERSION.1).expect("Failed to get forge version");
-    let forge_installer_path = {
-      let response = Client::new().get(&forge_version.get_installer_url()).send().await?.error_for_status()?;
-      let forge_installer = temp_dir().join("forge-installer.jar");
-      fs::write(&forge_installer, &response.bytes().await?)?;
-      forge_installer
-    };
-    let mut forge_installer_info = ForgeClientInstall::new(forge_installer_path, java_path.clone())?;
-    let forge_version_id = forge_installer_info.get_profile().get_version_id();
-
-    if !mc_dir.join("versions").join(&forge_version_id).join(format!("{}.json", forge_version_id)).is_file() {
-      info!("Forge not installed! Setting up forge...");
-      forge_installer_info.install_forge(&mc_dir, |_| true).await?;
-      info!("Forge installed!");
+  if versions_dir.is_dir() {
+    let forge_folder_re = Regex::new(&format!("{}.+{}", MINECRAFT_FORGE_VERSION.0, MINECRAFT_FORGE_VERSION.1)).unwrap();
+    let forge_version_name = versions_dir
+      .read_dir()?
+      .into_iter()
+      .filter_map(|dir| dir.ok())
+      .filter_map(|dir| dir.file_name().into_string().ok())
+      .find(|name| forge_folder_re.is_match(name));
+    if let Some(name) = forge_version_name {
+      return Ok(name);
     }
-    Ok(forge_version_id)
   }
+
+  let forge_version_handler = ForgeVersionHandler::new().await?;
+  let forge_version = forge_version_handler.get_by_forge_version(&MINECRAFT_FORGE_VERSION.1).expect("Failed to get forge version");
+  let forge_installer_path = {
+    let response = Client::new().get(&forge_version.get_installer_url()).send().await?.error_for_status()?;
+    let forge_installer = temp_dir().join("forge-installer.jar");
+    fs::write(&forge_installer, &response.bytes().await?)?;
+    forge_installer
+  };
+  let mut forge_installer_info = ForgeClientInstall::new(forge_installer_path, java_path.clone())?;
+  let forge_version_id = forge_installer_info.get_profile().get_version_id();
+
+  if !mc_dir.join("versions").join(&forge_version_id).join(format!("{}.json", forge_version_id)).is_file() {
+    info!("Forge not installed! Setting up forge...");
+    forge_installer_info.install_forge(&mc_dir, |_| true).await?;
+    info!("Forge installed!");
+  }
+  Ok(forge_version_id)
 }
 
 fn sanitize_path_buf(path: PathBuf) -> PathBuf {
