@@ -4,12 +4,20 @@
 mod msa_auth;
 mod logger;
 mod java;
+mod modpack_downloader;
 
-use std::{ path::{ PathBuf, Path }, env::{ self, temp_dir }, io::BufRead, sync::{ Arc, Mutex }, fs, thread::{ self, sleep }, time::Duration };
+use std::{
+  path::{ PathBuf, Path },
+  env::{ self, temp_dir, current_dir },
+  io::BufRead,
+  sync::{ Arc, Mutex },
+  thread::{ self, sleep },
+  time::Duration,
+  fs,
+};
 
 use forge_downloader::{ forge_client_install::ForgeClientInstall, download_utils::forge::ForgeVersionHandler };
-use log::{ info, LevelFilter, debug };
-use log4rs::{ config::{ Appender, Root, Config }, append::console::ConsoleAppender, encode::pattern::PatternEncoder, filter };
+use log::{ info, debug };
 use minecraft_launcher_core::{
   options::{ GameOptionsBuilder, LauncherOptions },
   versions::info::MCVersion,
@@ -21,11 +29,11 @@ use once_cell::sync::Lazy;
 use regex::{ Captures, Regex };
 use reqwest::Client;
 use serde::{ Deserialize, Serialize };
-use tauri::{ Window, Manager };
+use tauri::{ Window, Manager, Builder };
 
 use thiserror::Error;
 
-use crate::{ logger::LauncherAppender, java::{ download_java, check_java_dir } };
+use crate::{ logger::{ LauncherAppender, setup_logger }, java::{ download_java, check_java_dir } };
 
 static LAUNCHER_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
 static GAME_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
@@ -210,7 +218,8 @@ async fn start_game(state: tauri::State<'_, LauncherConfig>, window: Window, mc_
 }
 
 fn main() {
-  setup_logger();
+  // TODO: use game dir
+  setup_logger(&current_dir().unwrap().join("launcher_logs")).expect("Failed to initialize logger");
   info!("Starting tauri application...");
   LauncherAppender::add_callback(
     Box::new(move |msg| {
@@ -219,13 +228,12 @@ fn main() {
     })
   );
 
-  tauri::Builder
-    ::default()
+  Builder::default()
     .setup(|app| {
       let win = app.get_window("main").unwrap();
-      thread::Builder
-        ::new()
-        .name(format!("launcher-log-watcher"))
+      let builder = thread::Builder::new();
+      builder
+        .name("launcher-log-watcher".to_owned())
         .spawn(move || {
           loop {
             if let Ok(mut logs) = LAUNCHER_LOGS.try_lock() {
@@ -309,38 +317,4 @@ fn sanitize_path_buf(path: PathBuf) -> PathBuf {
   }
 
   new_path_buf
-}
-
-#[derive(Debug)]
-struct LogLevelFilter(LevelFilter);
-
-impl filter::Filter for LogLevelFilter {
-  fn filter(&self, record: &log::Record) -> filter::Response {
-    if record.level() <= self.0 { filter::Response::Neutral } else { filter::Response::Reject }
-  }
-}
-
-fn setup_logger() {
-  let stdout = Box::new(
-    ConsoleAppender::builder()
-      .encoder(
-        Box::new(PatternEncoder::new("[{d(%H:%M:%S)}] [{M}/{h({l})}]: {m}{n}" /*"{d(%Y-%m-%d %H:%M:%S)} | {h({({l}):5.5})} | {f}:{L} — {m}{n}"*/))
-      )
-      .build()
-  );
-
-  let launcher_appender = Box::new(LauncherAppender {
-    encoder: Box::new(PatternEncoder::new("[{d(%H:%M:%S)} {l}]: {m}{n}")),
-  });
-
-  let config = Config::builder()
-    .appender(Appender::builder().build("stdout", stdout))
-    .appender(
-      Appender::builder()
-        .filter(Box::new(LogLevelFilter(LevelFilter::Info)))
-        .build("launcher", launcher_appender)
-    )
-    .build(Root::builder().appender("stdout").appender("launcher").build(LevelFilter::Debug))
-    .expect("Failed to create log4rs config");
-  log4rs::init_config(config).expect("Failed to initialize log4rs");
 }
