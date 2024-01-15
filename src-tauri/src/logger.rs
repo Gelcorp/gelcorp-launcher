@@ -23,6 +23,20 @@ impl Filter for LogLevelFilter {
   }
 }
 
+#[derive(Debug)]
+struct ModuleFilter(String);
+
+impl Filter for ModuleFilter {
+  fn filter(&self, record: &Record) -> Response {
+    if let Some(path) = record.module_path() {
+      if path == self.0 || path.starts_with(&format!("{}::", self.0)) {
+        return Response::Reject;
+      }
+    }
+    Response::Neutral
+  }
+}
+
 static CALLBACKS: Mutex<Vec<Box<dyn (Fn(&str) -> Result<(), Box<dyn std::error::Error>>) + Send + Sync>>> = Mutex::new(vec![]);
 
 #[derive(Debug)]
@@ -91,10 +105,10 @@ pub fn setup_logger(logs_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>
 
   let stdout_appender = Appender::builder().build("stdout", Box::new(ConsoleAppender::builder().encoder(Box::new(console_encoder)).build()));
   let launcher_appender = Appender::builder()
+    .filter(Box::new(ModuleFilter("tao".to_string())))
     .filter(Box::new(LogLevelFilter(LevelFilter::Info)))
     .build("launcher", Box::new(LauncherAppender::new(Box::new(launcher_encoder))));
 
-  // TODO: use game dir
   let date = Utc::now().format("%Y-%m-%d").to_string();
   let latest_log = logs_dir.join("latest.log");
   let gzipped_log = {

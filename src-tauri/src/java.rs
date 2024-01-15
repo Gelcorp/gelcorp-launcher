@@ -20,14 +20,14 @@ pub fn check_java_dir(java_dir: &PathBuf) -> bool {
   Command::new(java)
     .stdout(Stdio::null())
     .stderr(Stdio::null())
-    .creation_flags(0x00000000)
+    .creation_flags(0x08000000)
     .arg("--version")
     .status()
     .is_ok_and(|c| c.success())
 }
 
 pub async fn download_java(java_dir: &PathBuf, java_version: &str) -> Result<(), Box<dyn std::error::Error>> {
-  let client = ClientBuilder::new().connect_timeout(Duration::from_secs(5)).build()?;
+  let client = ClientBuilder::new().connect_timeout(Duration::from_secs(30)).build()?;
   let os = match OS {
     "macos" => "mac",
     os => os,
