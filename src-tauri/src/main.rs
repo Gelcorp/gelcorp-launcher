@@ -27,18 +27,20 @@ use log::{ info, debug, error };
 use minecraft_launcher_core::{
   options::{ GameOptionsBuilder, LauncherOptions },
   versions::info::MCVersion,
-  profile_manager::auth::{ CommonUserAuthentication, UserAuthentication },
+  profile_manager::auth::{ CommonUserAuthentication, UserAuthentication, OfflineUserAuthentication },
   MinecraftGameRunner,
 };
 use minecraft_msa_auth::MinecraftAuthorizationFlow;
+use msa_auth::MSAuthToken;
 use once_cell::sync::Lazy;
 use regex::{ Captures, Regex };
 use reqwest::Client;
 use serde::{ Deserialize, Serialize };
-use serde_json::json;
+use serde_json::{ json, Value };
 use tauri::{ Window, Manager, Builder, State };
 
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::{ logger::{ LauncherAppender, setup_logger }, java::{ download_java, check_java_dir } };
 
