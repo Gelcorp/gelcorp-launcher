@@ -104,7 +104,7 @@ pub enum MSAuthError {
   #[error("CSRF state mismatch ({0} != {1})")] CsrfMismatch(String, String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)] // TODO: move to client crate
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MSAuthToken {
   pub access_token: String,
   pub refresh_token: String,
@@ -135,6 +135,7 @@ impl MSAuthToken {
       .body(url.query().unwrap().to_string())
       .header("Content-Type", "application/x-www-form-urlencoded")
       .send().await?
+      .error_for_status()?
       .json::<MSATokenResponse>().await?
       .into();
 

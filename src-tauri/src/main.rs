@@ -6,7 +6,17 @@ mod logger;
 mod java;
 mod modpack_downloader;
 
-use std::{ path::{ PathBuf, Path }, io::BufRead, sync::{ Arc, Mutex }, thread::{ self, sleep }, time::Duration, fs::{ self, File, create_dir_all }, env };
+use std::{
+  path::{ PathBuf, Path },
+  io::BufRead,
+  sync::{ Arc, Mutex },
+  thread::{ self, sleep },
+  time::Duration,
+  fs::{ self, File, create_dir_all },
+  env,
+  ops::DerefMut,
+  collections::VecDeque,
+};
 
 use forge_downloader::{
   forge_client_install::ForgeClientInstall,
@@ -42,25 +52,137 @@ const GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path("%appdata%/.minec
 
 const MINECRAFT_FORGE_VERSION: (&str, &str) = ("1.20.1", "47.2.0");
 
-/* TODO:
-    - Add a command to login to Cracked/Msa account
-    - Check for the auth to be valid at the start of the program
-*/
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum Authentication {
   Offline {
     username: String,
+    uuid: String,
   },
-  Msa {
-    msa_token: Option<String>,
-    msa_refresh_token: Option<String>,
-    msa_token_expire: Option<i32>,
-  },
+  Msa(MsaMojangAuth),
 }
 
-#[derive(Default, Serialize, Deserialize)]
+impl TryInto<Box<dyn UserAuthentication + Send + Sync>> for Authentication {
+  type Error = StdError;
+  fn try_into(self) -> Result<Box<dyn UserAuthentication + Send + Sync>, Self::Error> {
+    match self {
+      Authentication::Msa(msa) => {
+        let auth: CommonUserAuthentication = msa.into();
+        Ok(Box::new(auth))
+      }
+      Authentication::Offline { username, uuid } => Ok(Box::new(OfflineUserAuthentication { username, uuid: Uuid::parse_str(&uuid)? })),
+    }
+  }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MsaMojangAuth {
+  username: String,
+  uuid: String,
+
+  moj_token: String,
+  moj_expiration_date: i64,
+
+  msa_access_token: String,
+  msa_refresh_token: String,
+  msa_expiration_date: i64,
+}
+
+impl MsaMojangAuth {
+  fn expired_msa(&self) -> bool {
+    Utc::now().timestamp_millis() > self.msa_expiration_date
+  }
+
+  async fn refresh(&mut self, force: bool) -> Result<(), StdError> {
+    if self.expired_msa() || force {
+      self.refresh_msa(force).await?;
+    }
+    if self.expired_mojang() || force {
+      self.refresh_mojang(force).await?;
+    }
+    self.refresh_profile().await?;
+    Ok(())
+  }
+
+  async fn refresh_msa(&mut self, force: bool) -> Result<(), StdError> {
+    if !self.expired_msa() && !force {
+      return Ok(());
+    }
+    info!("Refreshing Microsoft token...");
+    let mut msa = MSAuthToken {
+      access_token: self.msa_access_token.clone(),
+      refresh_token: self.msa_refresh_token.clone(),
+      expiration_date: self.msa_expiration_date,
+    };
+    msa.refresh(force).await?;
+    self.msa_access_token = msa.access_token;
+    self.msa_refresh_token = msa.refresh_token;
+    self.msa_expiration_date = msa.expiration_date;
+    Ok(())
+  }
+
+  fn expired_mojang(&self) -> bool {
+    Utc::now().timestamp_millis() > self.moj_expiration_date
+  }
+
+  async fn refresh_mojang(&mut self, force: bool) -> Result<(), StdError> {
+    if !self.expired_mojang() && !force {
+      return Ok(());
+    }
+    info!("Refreshing Minecraft token...");
+    let mc_token = MinecraftAuthorizationFlow::new(Client::new())
+      .exchange_microsoft_token(&self.msa_access_token).await
+      .map_err(|err| format!("Failed to exchange msa token: {}", err))?;
+
+    self.username = mc_token.username().clone();
+    self.moj_token = mc_token.access_token().clone().into_inner();
+    self.moj_expiration_date = Utc::now().timestamp_millis() + (mc_token.expires_in() as i64) * 1000;
+    Ok(())
+  }
+
+  async fn refresh_profile(&mut self) -> Result<(), StdError> {
+    info!("Fetching profile info...");
+    let response = Client::new()
+      .get("https://api.minecraftservices.com/minecraft/profile")
+      .bearer_auth(&self.moj_token)
+      .send().await?
+      .error_for_status()?
+      .json::<Value>().await?;
+    self.username = response["name"].as_str().ok_or("Failed to get username")?.to_string();
+    self.uuid = response["id"].as_str().ok_or("Failed to get uuid")?.to_string();
+    info!("Username = {} UUID = {}", self.username, self.uuid);
+    Ok(())
+  }
+
+  async fn from(msa: MSAuthToken) -> Result<Self, StdError> {
+    let mut new = Self {
+      username: String::new(),
+      uuid: String::new(),
+
+      moj_token: String::new(),
+      moj_expiration_date: 0,
+
+      msa_access_token: msa.access_token,
+      msa_refresh_token: msa.refresh_token,
+      msa_expiration_date: msa.expiration_date,
+    };
+    new.refresh(false).await?;
+    Ok(new)
+  }
+}
+
+impl Into<CommonUserAuthentication> for MsaMojangAuth {
+  fn into(self) -> CommonUserAuthentication {
+    CommonUserAuthentication {
+      access_token: self.msa_access_token,
+      auth_playername: self.username,
+      auth_uuid: Uuid::parse_str(&self.uuid).unwrap(),
+      user_type: "msa".to_string(),
+    }
+  }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct LauncherConfig {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   authentication: Option<Authentication>,
@@ -68,26 +190,58 @@ struct LauncherConfig {
   memory_max: u16,
 }
 
-impl LauncherConfig {
-  fn load_from_file() -> Self {
-    // TODO: load from file, otherwise return None
-    let mut config = Self {
+impl Default for LauncherConfig {
+  fn default() -> Self {
+    Self {
       authentication: None,
       memory_max: LauncherConfig::default_memory_max(),
-    };
-    config.validate_session();
+    }
+  }
+}
+
+impl LauncherConfig {
+  fn get_file_path() -> PathBuf {
+    GAME_DIR_PATH.join("launcher_config.json")
+  }
+
+  async fn load_from_file() -> Self {
+    let mut config: LauncherConfig = File::open(Self::get_file_path())
+      .ok()
+      .and_then(|mut f| serde_json::from_reader(&mut f).ok())
+      .unwrap_or_default();
+    config.validate_session().await;
+    let _ = config.save_to_file();
     config
   }
 
-  fn validate_session(&mut self) {
-    // TODO: check if expired, and then clear the auth method (only on ram)
+  async fn validate_session(&mut self) {
+    if let Some(authentication) = self.authentication.as_mut() {
+      if let Authentication::Msa(msa) = authentication {
+        if let Err(err) = msa.refresh(false).await {
+          error!("Failed to refresh msa token: {}", err);
+          self.authentication = None;
+          let _ = self.save_to_file();
+        } else {
+          info!("Logged in successfully to msa");
+        }
+      }
+    }
   }
 
-  fn save_to_file(&self) {
-    // TODO: save to file
+  fn save_to_file(&self) -> Result<(), StdError> {
+    let path = Self::get_file_path();
+    let mut file = File::create(&path)?;
+    if let Some(parent) = path.parent() {
+      create_dir_all(parent)?;
+    }
+    serde_json::to_writer_pretty(&mut file, &self)?;
+    Ok(())
   }
 
-  fn update_state(&self, window: &Window) {}
+  fn broadcast_update(&self, window: &Window) -> Result<(), StdError> {
+    window.emit("launcher_config_update", &self)?;
+    Ok(())
+  }
 
   fn default_memory_max() -> u16 {
     1024
@@ -116,7 +270,7 @@ impl Serialize for TauriError {
 }
 
 #[tauri::command]
-async fn start_game(state: State<'_, LauncherConfig>, window: Window) -> Result<(), TauriError> where Window: Sync {
+async fn start_game(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> Result<(), TauriError> where Window: Sync {
   let window = Arc::new(window);
   let res = real_start_game(state, window.clone()).await.map_err(|e| e.into());
   flush_launcher_logs(&window);
@@ -126,7 +280,16 @@ async fn start_game(state: State<'_, LauncherConfig>, window: Window) -> Result<
   res
 }
 
-async fn real_start_game(state: State<'_, LauncherConfig>, window: Arc<Window>) -> Result<(), StdError> where Window: Sync {
+async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Window>) -> Result<(), StdError> where Window: Sync {
+  let authentication = {
+    let config = state.lock().unwrap();
+    let authentication = config.authentication.as_ref();
+    if authentication.is_none() {
+      config.broadcast_update(&window)?;
+      return Err("Not logged in!".into());
+    }
+    authentication.unwrap().clone()
+  };
   info!("Attempting to launch the game...");
   let mc_dir = GAME_DIR_PATH.clone();
   let java_path = mc_dir.join("jre-runtime");
@@ -145,21 +308,12 @@ async fn real_start_game(state: State<'_, LauncherConfig>, window: Arc<Window>) 
   let (forge_installer_path, forge_version_name) = check_forge(&mc_dir, &java_executable_path).await?;
   info!("Forge Version: {}", &forge_version_name);
 
-  info!("Logging in to MSA...");
-  let ms_auth_token = msa_auth::get_msa_token(&window).await.map_err(|err| TauriError::Other(format!("Failed to get msa token: {}", err)))?;
-
-  let mc_token = MinecraftAuthorizationFlow::new(Client::new())
-    .exchange_microsoft_token(ms_auth_token.access_token).await
-    .map_err(|err| TauriError::Other(format!("Failed to exchange msa token: {}", err)))?;
-  let mc_token = mc_token.access_token().clone().into_inner();
-
-  let auth = CommonUserAuthentication::from_minecraft_token(&mc_token).await.unwrap();
-  // let auth = OfflineUserAuthentication::new("Player");
+  let auth: Box<dyn UserAuthentication + Send + Sync> = authentication.try_into()?;
   info!("Logged in as {}", auth.auth_player_name());
 
   let jvm_args = format!(
     "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
-    state.memory_max,
+    state.lock().unwrap().memory_max,
     mc_dir.join("libraries").display(),
     forge_installer_path.display(),
     mc_dir.join(format!("versions/{id}/{id}.jar", id = &forge_version_name)).display()
@@ -174,7 +328,7 @@ async fn real_start_game(state: State<'_, LauncherConfig>, window: Arc<Window>) 
     .java_path(java_executable_path)
     .version(MCVersion::from(forge_version_name))
     .launcher_options(LauncherOptions::new(LAUNCHER_NAME, LAUNCHER_VERSION))
-    .authentication(Box::new(auth))
+    .authentication(auth)
     .jvm_args(jvm_args)
     .max_concurrent_downloads(4)
     .max_download_attempts(15)
@@ -215,10 +369,46 @@ async fn real_start_game(state: State<'_, LauncherConfig>, window: Arc<Window>) 
       }
     }
   }
+}
+
 #[tauri::command]
 fn get_launcher_logs_cache() -> Result<Vec<String>, TauriError> {
   Ok(LAUNCHER_LOGS_CACHE.lock().unwrap().clone().into())
 }
+
+#[tauri::command]
+fn get_launcher_config(state: State<'_, Mutex<LauncherConfig>>) -> Result<LauncherConfig, TauriError> {
+  Ok(state.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn set_launcher_config(state: State<'_, Mutex<LauncherConfig>>, config: LauncherConfig) -> Result<(), TauriError> {
+  let mut state = state.lock().unwrap();
+  *state.deref_mut() = config;
+  state.save_to_file()?;
+  Ok(())
+}
+
+#[tauri::command]
+fn login_offline(state: State<'_, Mutex<LauncherConfig>>, window: Window, username: String) -> Result<(), TauriError> {
+  let mut state = state.lock().unwrap();
+  let uuid = Uuid::new_v3(&Uuid::NAMESPACE_DNS, format!("OfflinePlayer:{username}").as_bytes()).to_string();
+  state.authentication = Some(Authentication::Offline { username, uuid });
+  state.broadcast_update(&window)?;
+  state.save_to_file()?;
+  Ok(())
+}
+
+#[tauri::command]
+async fn login_msa(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> Result<(), TauriError> {
+  let ms_auth_token = msa_auth::get_msa_token(&window).await.map_err(|err| TauriError::Other(format!("Failed to get msa token: {}", err)))?;
+  let auth = MsaMojangAuth::from(ms_auth_token).await.map_err(|err| TauriError::Other(format!("Failed to login: {}", err)))?;
+
+  let mut state = state.lock().unwrap();
+  state.authentication = Some(Authentication::Msa(auth));
+  state.broadcast_update(&window)?;
+  state.save_to_file()?;
+  Ok(())
 }
 
 fn flush_launcher_logs(win: &Window) {
@@ -268,8 +458,8 @@ fn main() {
         .expect("Failed to spawn log watcher thread");
       Ok(())
     })
-    .manage(LauncherConfig::load_from_file())
-    .invoke_handler(tauri::generate_handler![start_game, get_launcher_logs_cache])
+    .manage(Mutex::new(LauncherConfig::load_from_file().await))
+    .invoke_handler(tauri::generate_handler![start_game, get_launcher_logs_cache, get_launcher_config, set_launcher_config, login_offline, login_msa])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }
