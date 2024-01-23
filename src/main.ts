@@ -1,8 +1,12 @@
 import "./styles.css";
-import App from "./App.svelte";
+import Main from "./App.svelte";
 
-const app = new App({
-  target: document.getElementById("app"),
+document.addEventListener("contextmenu", event => {
+  event.preventDefault();
+})
+
+const app = new Main({
+  target: document.getElementById("app") as Element,
 });
 
 export default app;
