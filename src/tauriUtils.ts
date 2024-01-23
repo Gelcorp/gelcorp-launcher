@@ -1,20 +1,8 @@
 import type { EventCallback } from "@tauri-apps/api/event";
 import { appWindow } from "@tauri-apps/api/window";
 
-export type ClientEventPayload = {
-  download: {
-    info: string;
-    count: number;
-    total: number;
-  },
-  debug: string
-}
-
 type PayloadType = {
   "log": string | string[],
-  "client_event": {
-    type: keyof ClientEventPayload, data: ClientEventPayload[keyof ClientEventPayload]
-  },
   "launcher_log": string | string[]
 }
 
