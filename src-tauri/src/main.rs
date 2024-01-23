@@ -18,6 +18,7 @@ use std::{
   collections::VecDeque,
 };
 
+use chrono::Utc;
 use forge_downloader::{
   forge_client_install::ForgeClientInstall,
   download_utils::forge::ForgeVersionHandler,
@@ -26,8 +27,9 @@ use forge_downloader::{
 use log::{ info, debug, error };
 use minecraft_launcher_core::{
   options::{ GameOptionsBuilder, LauncherOptions },
-  versions::info::MCVersion,
   profile_manager::auth::{ CommonUserAuthentication, UserAuthentication, OfflineUserAuthentication },
+  progress_reporter::{ ProgressReporter, ProgressUpdate },
+  versions::info::MCVersion,
   MinecraftGameRunner,
 };
 use minecraft_msa_auth::MinecraftAuthorizationFlow;
@@ -282,6 +284,13 @@ async fn start_game(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> 
   res
 }
 
+#[derive(Default, Serialize, Clone)]
+pub struct DownloadProgress {
+  pub status: String,
+  pub current: u32,
+  pub total: u32,
+}
+
 async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Window>) -> Result<(), StdError> where Window: Sync {
   let authentication = {
     let config = state.lock().unwrap();
@@ -292,6 +301,40 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     }
     authentication.unwrap().clone()
   };
+
+  let monitor = {
+    let window = Arc::clone(&window);
+    let progress: Mutex<Option<DownloadProgress>> = Mutex::new(None);
+    Arc::new(
+      ProgressReporter::new(move |update| {
+        let progress = &mut *progress.lock().unwrap();
+        let mut new_progress = progress.clone().unwrap_or_default();
+        let clear = matches!(update, ProgressUpdate::Clear);
+        match update {
+          ProgressUpdate::SetStatus(status) => {
+            new_progress.status = status;
+          }
+          ProgressUpdate::SetProgress(current) => {
+            new_progress.current = current;
+          }
+          ProgressUpdate::SetTotal(total) => {
+            new_progress.total = total;
+          }
+          ProgressUpdate::SetAll(status, current, total) => {
+            new_progress = DownloadProgress { status, current, total };
+          }
+          ProgressUpdate::Clear => {}
+        }
+        if clear {
+          progress.take();
+        } else {
+          progress.replace(new_progress);
+        }
+        let _ = window.emit("update_progress", progress.clone());
+      })
+    )
+  };
+
   info!("Attempting to launch the game...");
   let mc_dir = GAME_DIR_PATH.clone();
   let java_path = mc_dir.join("jre-runtime");
@@ -303,7 +346,7 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
   debug!("Checking java runtime...");
   if !check_java_dir(&java_path) {
     info!("Java runtime not found. Downloading...");
-    download_java(&java_path, "17").await.map_err(|err| TauriError::Other(format!("Failed to download java: {}", err)))?;
+    download_java(monitor.clone(), &java_path, "17").await.map_err(|err| TauriError::Other(format!("Failed to download java: {}", err)))?;
     info!("Java downloaded successfully!");
   }
 
@@ -334,6 +377,7 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     .jvm_args(jvm_args)
     .max_concurrent_downloads(4)
     .max_download_attempts(15)
+    .progress_reporter_arc(&monitor)
     .build()
     .map_err(|err| TauriError::Other(format!("Failed to create game options: {err}")))?;
 

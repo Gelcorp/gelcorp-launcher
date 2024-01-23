@@ -6,9 +6,11 @@ use std::{
   io::{ BufWriter, Write, self },
   process::{ Command, Stdio },
   os::windows::process::CommandExt,
+  sync::Arc,
 };
 
 use futures::StreamExt;
+use minecraft_launcher_core::progress_reporter::ProgressReporter;
 use reqwest::ClientBuilder;
 use zip::ZipArchive;
 
@@ -26,7 +28,7 @@ pub fn check_java_dir(java_dir: &PathBuf) -> bool {
     .is_ok_and(|c| c.success())
 }
 
-pub async fn download_java(java_dir: &PathBuf, java_version: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn download_java(reporter: Arc<ProgressReporter>, java_dir: &PathBuf, java_version: &str) -> Result<(), Box<dyn std::error::Error>> {
   let client = ClientBuilder::new().connect_timeout(Duration::from_secs(30)).build()?;
   let os = match OS {
     "macos" => "mac",
@@ -46,16 +48,21 @@ pub async fn download_java(java_dir: &PathBuf, java_version: &str) -> Result<(),
   {
     // Downloading java
     let mut file = File::create(&temp_file_path)?;
-    let mut progress = 0;
-    let total = response.content_length().unwrap();
+    let status = format!("Downloading java {}", java_version);
+    let mut current = 0;
+    let total = response.content_length().unwrap() as u32;
+
+    reporter.set(&status, current, total);
 
     let mut writer = BufWriter::new(&mut file);
     let mut stream = response.bytes_stream();
     while let Some(Ok(chunk)) = stream.next().await {
-      progress += chunk.len();
+      current += chunk.len() as u32;
       writer.write_all(&chunk)?;
-      // println!("Downloading java {}%", (progress * 100) / (total as usize));
+      reporter.set_progress(current);
     }
+
+    reporter.clear();
   }
   // Extract file
   {
@@ -69,7 +76,7 @@ pub async fn download_java(java_dir: &PathBuf, java_version: &str) -> Result<(),
       let mut zip_archive = archive.by_index(i)?;
       if let Some((_, file_name)) = zip_archive.name().split_once("/") {
         progress += 1;
-        // println!("Extracting java {}%", (progress * 100) / total);
+        reporter.set(&format!("Extracting {}", file_name), progress, total as u32);
         let target_path = java_dir.join(file_name);
         if file_name.is_empty() {
           continue;
@@ -88,6 +95,7 @@ pub async fn download_java(java_dir: &PathBuf, java_version: &str) -> Result<(),
       }
     }
   }
+  reporter.clear();
   let _ = fs::remove_file(temp_file_path);
 
   Ok(())
@@ -95,8 +103,7 @@ pub async fn download_java(java_dir: &PathBuf, java_version: &str) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-  use std::env::temp_dir;
-
+  use std::{ env::temp_dir, sync::Arc };
   use super::*;
 
   #[tokio::test]
@@ -106,7 +113,7 @@ mod tests {
       println!("Java already exists");
       return Ok(());
     }
-    download_java(&java_dir, "17").await?;
+    download_java(Arc::new(ProgressReporter::default()), &java_dir, "17").await?;
     assert!(check_java_dir(&java_dir));
     Ok(())
   }
