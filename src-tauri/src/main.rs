@@ -343,8 +343,8 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     let mut buf = String::new();
     if let Ok(length) = process.stdout().read_line(&mut buf) {
       if length > 0 {
-        println!("{}", &buf.trim());
-        GAME_LOGS.lock().unwrap().push(buf.trim().to_string());
+        println!("{}", &buf.trim_end());
+        GAME_LOGS.lock().unwrap().push(buf.trim_end().to_string());
         buf.clear();
       }
     }
@@ -352,8 +352,8 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     if process.stderr().buffer().len() > 0 {
       if let Ok(length) = process.stderr().read_line(&mut buf) {
         if length > 0 {
-          println!("{}", &buf.trim());
-          GAME_LOGS.lock().unwrap().push(buf.trim().to_string());
+          println!("{}", &buf.trim_end());
+          GAME_LOGS.lock().unwrap().push(buf.trim_end().to_string());
           buf.clear();
         }
       }
