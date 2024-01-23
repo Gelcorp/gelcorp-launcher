@@ -33,6 +33,7 @@ use thiserror::Error;
 use crate::{ logger::{ LauncherAppender, setup_logger }, java::{ download_java, check_java_dir } };
 
 static LAUNCHER_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
+static LAUNCHER_LOGS_CACHE: Lazy<Arc<Mutex<VecDeque<String>>>> = Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
 static GAME_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
 
 const LAUNCHER_NAME: &str = "Survitroll Launcher";
@@ -214,15 +215,10 @@ async fn real_start_game(state: State<'_, LauncherConfig>, window: Arc<Window>) 
       }
     }
   }
-
-  // TODO: implement a similar aproach with a monitor
-  // bootstrap.on_client_event({
-  //   let window = Arc::clone(&window);
-  //   move |event| {
-  //     println!("{event:?}");
-  //     window.emit("client_event", event).unwrap();
-  //   }
-  // });
+#[tauri::command]
+fn get_launcher_logs_cache() -> Result<Vec<String>, TauriError> {
+  Ok(LAUNCHER_LOGS_CACHE.lock().unwrap().clone().into())
+}
 }
 
 fn flush_launcher_logs(win: &Window) {
@@ -246,7 +242,13 @@ fn main() {
   info!("Starting tauri application...");
   LauncherAppender::add_callback(
     Box::new(move |msg| {
-      LAUNCHER_LOGS.lock()?.push(msg.trim().to_string());
+      LAUNCHER_LOGS.lock()?.push(msg.trim_end().to_string());
+      if let Ok(mut cache) = LAUNCHER_LOGS_CACHE.lock() {
+        cache.push_back(msg.trim_end().to_string());
+        while cache.len() >= 1001 {
+          let _ = cache.pop_front();
+        }
+      }
       Ok(())
     })
   );
@@ -267,7 +269,7 @@ fn main() {
       Ok(())
     })
     .manage(LauncherConfig::load_from_file())
-    .invoke_handler(tauri::generate_handler![start_game])
+    .invoke_handler(tauri::generate_handler![start_game, get_launcher_logs_cache])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

@@ -1,7 +1,12 @@
 import { writable } from "svelte/store";
 import { tauriListen } from "../tauriUtils";
+import { invoke } from "@tauri-apps/api";
 
 const launcherLogsWritable = writable([] as string[], () => {
+  invoke("get_launcher_logs_cache").then((e) => {
+    launcherLogsWritable.set(e as string[]);
+  });
+  
   return tauriListen("launcher_log", (event) => {
     let arr = [];
     if (typeof event.payload === 'string') {
