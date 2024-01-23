@@ -426,7 +426,8 @@ fn flush_launcher_logs(win: &Window) {
   }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
   let logs_dir = GAME_DIR_PATH.join("logs/gelcorp-launcher");
   setup_logger(&logs_dir).expect("Failed to initialize logger");
   info!("Starting tauri application...");
