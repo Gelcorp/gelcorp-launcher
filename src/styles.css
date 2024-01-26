@@ -1,6 +1,6 @@
 @font-face {
   font-family: "Minecraft Ten";
-  src: url("/MinecraftTen.ttf");
+  src: url("/fonts/MinecraftTen.woff2") format("woff2");
 }
 
 :root {
