@@ -29,3 +29,6 @@ src-tauri/src/modpack_downloader/keys/aes_key.json
 src-tauri/src/modpack_downloader/keys/public_key.pem
 
 pnpm-lock.yaml
+
+.env
+.env.local

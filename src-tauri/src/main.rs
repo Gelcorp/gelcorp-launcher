@@ -49,9 +49,9 @@ static LAUNCHER_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mute
 static LAUNCHER_LOGS_CACHE: Lazy<Arc<Mutex<VecDeque<String>>>> = Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
 static GAME_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
 
-const LAUNCHER_NAME: &str = "Survitroll Launcher";
-const LAUNCHER_VERSION: &str = "2.0.0";
-const GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path("%appdata%/.minecraft_test_rust"));
+const LAUNCHER_NAME: &str = env!("LAUNCHER_NAME");
+const LAUNCHER_VERSION: &str = env!("LAUNCHER_VERSION");
+const GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path(&env!("GAME_DIR_PATH")));
 
 const MINECRAFT_FORGE_VERSION: (&str, &str) = ("1.20.1", "47.2.0");
 

@@ -86,7 +86,10 @@ impl LauncherConfig {
   }
 
   fn default_providers() -> Vec<String> {
-    vec![format!("http://localhost:3000")]
+    env!("DEFAULT_PROVIDERS")
+      .split(" ")
+      .map(|s| s.to_string())
+      .collect()
   }
 }
 
