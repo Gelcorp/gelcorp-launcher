@@ -188,7 +188,7 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     .launcher_options(LauncherOptions::new(LAUNCHER_NAME, LAUNCHER_VERSION))
     .authentication(auth)
     .jvm_args(jvm_args)
-    .max_concurrent_downloads(4)
+    .max_concurrent_downloads(8)
     .max_download_attempts(15)
     .progress_reporter_arc(&monitor)
     .build()
