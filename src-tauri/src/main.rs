@@ -44,7 +44,7 @@ use tauri::{ Window, Manager, Builder, State };
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{ logger::{ LauncherAppender, setup_logger }, java::{ download_java, check_java_dir } };
+use crate::{ java::{ download_java, check_java_dir }, logger::{ LauncherAppender, setup_logger }, modpack_downloader::ModpackProvider };
 
 static LAUNCHER_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
 static LAUNCHER_LOGS_CACHE: Lazy<Arc<Mutex<VecDeque<String>>>> = Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
@@ -190,6 +190,12 @@ impl Into<CommonUserAuthentication> for MsaMojangAuth {
 struct LauncherConfig {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   authentication: Option<Authentication>,
+
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  selected_options: Vec<String>,
+  #[serde(default = "LauncherConfig::default_providers", skip_serializing_if = "Vec::is_empty")]
+  providers: Vec<String>,
+
   #[serde(default = "LauncherConfig::default_memory_max")]
   memory_max: u16,
 }
@@ -198,6 +204,8 @@ impl Default for LauncherConfig {
   fn default() -> Self {
     Self {
       authentication: None,
+      selected_options: vec![],
+      providers: LauncherConfig::default_providers(),
       memory_max: LauncherConfig::default_memory_max(),
     }
   }
@@ -249,6 +257,10 @@ impl LauncherConfig {
 
   fn default_memory_max() -> u16 {
     1024
+  }
+
+  fn default_providers() -> Vec<String> {
+    vec![format!("http://localhost:3000")]
   }
 }
 
@@ -348,6 +360,16 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     info!("Java runtime not found. Downloading...");
     download_java(monitor.clone(), &java_path, "17").await.map_err(|err| TauriError::Other(format!("Failed to download java: {}", err)))?;
     info!("Java downloaded successfully!");
+  }
+
+  {
+    debug!("Checking modpack...");
+    let LauncherConfig { selected_options, providers, .. } = state.lock().unwrap().clone();
+    let providers: Vec<ModpackProvider> = providers
+      .iter()
+      .map(|p| ModpackProvider::new(p))
+      .collect();
+    modpack_downloader::install_modpack_if_necessary(&mc_dir, providers, selected_options).await?;
   }
 
   let (forge_installer_path, forge_version_name) = check_forge(&mc_dir, &java_executable_path).await?;

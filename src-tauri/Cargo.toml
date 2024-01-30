@@ -20,7 +20,7 @@ regex = "1.10.2"
 uuid = { version = "1.6.1", features = ["v3"], default-features = false }
 reqwest = "0.11.22"
 sha1 = "0.10.6"
-hex = "0.4.3"
+hex = { version = "0.4.3", features = ["serde"] }
 tokio = { version = "1.34.0", features = ["full"] }
 minecraft-msa-auth = "0.3.0"
 oauth2 = "4.4.2"
@@ -31,13 +31,18 @@ derive_builder = "0.12.0"
 zip = "0.6.6"
 os_info = "3.7.0"
 async-recursion = "1.0.5"
-forge-downloader = { git = "https://github.com/Gelcorp/forge-downloader.git" }               # { path = "../../forge-downloader" }
+forge-downloader = { git = "https://github.com/Gelcorp/forge-downloader.git" } # { path = "../../forge-downloader" }
 minecraft-launcher-core = { git = "https://github.com/Gelcorp/minecraft-launcher-core.git" } # { path = "../../minecraft-launcher-core" }
+gelcorp-modpack = { git = "https://github.com/Gelcorp/gelcorp-modpack.git", default-features = false, features = [
+  "install",
+] }
 log4rs = { version = "1.2.0", features = ["gzip"] }
 log = "0.4.20"
 anyhow = "1.0.79"
 once_cell = "1.19.0"
 rsa = { version = "0.9.6", features = ["sha2"] }
+cbc = "0.1.2"
+aes = "0.8.3"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

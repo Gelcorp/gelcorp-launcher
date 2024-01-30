@@ -1,0 +1,257 @@
+pub mod keys;
+
+use std::{ fs::{ self, create_dir_all }, io::{ Cursor, Write }, path::PathBuf, time::Duration };
+
+use aes::{ cipher::{ block_padding::Pkcs7, BlockDecryptMut, KeyIvInit }, Aes256 };
+use cbc::Decryptor;
+use chrono::Utc;
+use futures::StreamExt;
+use gelcorp_modpack::{ reader::zip::ModpackArchiveReader, types::ModOptional };
+use log::{ error, info, warn };
+use reqwest::{ Url, Client, ClientBuilder };
+use rsa::{ sha2::Sha256, Pkcs1v15Sign, RsaPublicKey };
+use serde::{ Deserialize, Serialize };
+use sha1::Digest;
+use tokio::{ fs::File, io::{ AsyncWriteExt, BufWriter, self } };
+use zip::ZipArchive;
+
+use crate::modpack_downloader::keys::{ get_aes_keys, get_public_key };
+
+/*
+Process:
+  0.  Fetch modpack info to see what parts the launcher has to download
+  0.5 Reconstruct Encrypted bundle by joining the parts
+  1.  Download modpack (if remote sha256 is different from locally calculated sha256, or if the modpack wasn't downloaded yet)
+        - Sha256 should be calculated from encrypted version
+  2.  Verify modpack signature with public key
+  2.5 Save modpack for future checks
+  3.  Decypher modpack
+  4.  Parse modpack and extract files
+  5.  Done!
+  
+Modpack structure:
+mods/                     // Essential mods, mandatory
+  - libs/                 // Essential libs (for essential mods, mandatory) 
+  - {optional_mods}/      // Optional mods (performance, visuals, etc)
+    - libs/
+    - {mod}.jar
+  - {mod}.jar             
+.minecraft/               // Config Files, files to extract in general (check config)
+manifest.json
+  - format_version: 1    // Format version of deserializer
+*/
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModpackInfo {
+  pub parts: Vec<String>,
+  pub minecraft_version: String,
+  pub forge_version: String,
+
+  #[serde(default)]
+  pub optionals: Vec<ModOptional>,
+  pub checksum: String, // Sha256  (hex)
+  pub signature: String, // Rsa     (hex)
+}
+
+pub struct ModpackProvider {
+  base_url: Url,
+  client: Client,
+}
+
+impl ModpackProvider {
+  pub fn new(base_url: &str) -> Self {
+    let base_url = if !base_url.ends_with("/") { Url::parse(&(base_url.to_owned() + "/")).unwrap() } else { Url::parse(base_url).unwrap() };
+    Self {
+      base_url,
+      client: ClientBuilder::new().connect_timeout(Duration::from_millis(5000)).build().unwrap(),
+    }
+  }
+
+  pub async fn fetch_info(&self) -> Result<ModpackInfo, Box<dyn std::error::Error>> {
+    let url = self.base_url.join("modpack_info.json")?;
+    let modpack_info: ModpackInfo = self.client.get(url).send().await?.error_for_status()?.json().await?;
+    Ok(modpack_info)
+  }
+
+  pub async fn reconstruct_encrypted_modpack(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let ModpackInfo { parts, .. } = self.fetch_info().await?;
+    assert!(!parts.is_empty(), "No modpack parts provided");
+    let tmp_dir = std::env::temp_dir().join(format!("modpack-{}", Utc::now().timestamp_millis()));
+    create_dir_all(&tmp_dir)?;
+
+    async fn download_part(client: &Client, url: &Url, target: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+      let response = client.get(url.as_str()).send().await?.error_for_status()?;
+      let mut stream = response.bytes_stream();
+      let mut file = File::create(target).await?;
+      while let Some(Ok(chunk)) = stream.next().await {
+        file.write_all(&chunk).await?;
+        file.flush().await?;
+      }
+      Ok(())
+    }
+
+    // TODO: concurrency!!!
+    for file_name in &parts {
+      let mut attempts = 0;
+      let url = self.base_url.join(&file_name)?;
+      let target = tmp_dir.join(&file_name);
+      while attempts < 5 {
+        info!("Downloading {} (attempt {})", &file_name, attempts + 1);
+        if let Err(e) = download_part(&self.client, &url, &target).await {
+          error!("Error downloading {}: {}", &file_name, e);
+          attempts += 1;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // Join parts
+    let mut buf = vec![];
+    for file_name in &parts {
+      let file = File::open(tmp_dir.join(&file_name)).await?;
+      let mut reader = BufWriter::new(file);
+      io::copy(&mut reader, &mut buf).await?;
+    }
+
+    Ok(buf)
+  }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct LocalInstallInfo {
+  checksum: String,
+  optionals: Vec<String>,
+  extracted_mods: Vec<String>,
+}
+
+type Aes256CbcDec = Decryptor<Aes256>;
+type StdError = Box<dyn std::error::Error>;
+
+fn get_local_modpack_enc_hash(local_modpack_path: &PathBuf) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+  let bytes = fs::read(&local_modpack_path)?;
+  let sum = <Sha256 as Digest>::digest(bytes);
+  Ok(sum.into())
+}
+
+pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<ModpackProvider>, chosen_optionals: Vec<String>) -> Result<(), StdError> {
+  let (public_key, aes_keys) = (get_public_key()?, get_aes_keys()?);
+
+  let local_modpack_dir_path = mc_dir.join("modpack");
+  // TODO: let local_install_info_path = local_modpack_dir_path.join("install_info.json");
+  let local_modpack_path = local_modpack_dir_path.join("modpack.enc.zip");
+  let local_modpack_sig_path = local_modpack_dir_path.join("modpack.enc.sig");
+
+  if local_modpack_path.is_file() && local_modpack_sig_path.is_file() {
+    info!("Local modpack found! Verifying...");
+    let signature = fs::read(&local_modpack_sig_path)?;
+    let local_modpack_sha256 = get_local_modpack_enc_hash(&local_modpack_path)?;
+    if let Err(_) = public_key.verify(Pkcs1v15Sign::new::<Sha256>(), &local_modpack_sha256, &signature) {
+      warn!("Invalid local modpack! Downloading it again...");
+      fs::remove_file(&local_modpack_path)?;
+      fs::remove_file(&local_modpack_sig_path)?;
+    }
+  }
+
+  let local_modpack_sha256 = get_local_modpack_enc_hash(&local_modpack_path).ok();
+
+  let mut provider_success = false;
+  let mut should_install = false;
+  info!("Checking for updates...");
+  for provider in &providers {
+    info!(" - Trying provider '{}'", provider.base_url);
+    let remote_info = provider.fetch_info().await;
+    if let Err(err) = remote_info {
+      warn!("   Error checking provider: {}", err);
+      continue;
+    }
+    let remote_info = remote_info?;
+    provider_success = true;
+
+    let remote_checksum = hex::decode(&remote_info.checksum);
+    if let Err(err) = remote_checksum {
+      warn!("   Error decoding remote checksum: {}", err);
+      continue;
+    }
+    let remote_checksum: [u8; 32] = remote_checksum?.try_into().map_err(|_| format!("Checksum is not 32 bytes: {}", remote_info.checksum))?;
+
+    if let Some(local_checksum) = local_modpack_sha256 {
+      info!("   Found local modpack info! Checking for updates...");
+      if local_checksum == remote_checksum {
+        info!("   Local modpack is up to date!");
+        break;
+      }
+      info!("   Local modpack is outdated! Updating...");
+    } else {
+      // No previous modpack downloaded
+      info!("   Modpack not found. Downloading...");
+    }
+
+    // Download it
+    info!("   Downloading modpack...");
+    let remote_modpack = provider.reconstruct_encrypted_modpack().await?;
+
+    // Verify installation
+    info!("   Remote modpack downloaded! Verifying checksum...");
+    let manual_checksum: [u8; 32] = <Sha256 as Digest>::digest(&remote_modpack).into();
+    if manual_checksum != remote_checksum {
+      warn!("   Checksum mismatch. Download failed! (Remote: {}, Downloaded: {})", hex::encode(&remote_checksum), hex::encode(&manual_checksum));
+      continue;
+    }
+
+    let signature = hex::decode(remote_info.signature)?;
+    if let Err(err) = public_key.verify(Pkcs1v15Sign::new::<Sha256>(), &manual_checksum, &signature) {
+      warn!("   Failed to check signature. Download failed! ({})", err);
+    }
+
+    info!("   Modpack verified! Saving files...");
+    create_dir_all(&local_modpack_dir_path)?;
+    fs::File::create(&local_modpack_path)?.write_all(&remote_modpack)?;
+    fs::File::create(&local_modpack_sig_path)?.write_all(&signature)?;
+    should_install = true;
+    info!("Modpack download completed!");
+    break;
+  }
+  if !local_modpack_path.is_file() || !provider_success {
+    if !provider_success {
+      error!("All providers failed! Quitting...");
+    }
+    error!("Failed to download modpack!");
+    return Err("Failed to download modpack".into());
+  }
+
+  // TODO: Remove this, check if optionals change, or execute each time (because of replace = true config files ???)
+  should_install = true;
+
+  if !should_install {
+    return Ok(());
+  }
+
+  let aes_decoder = Aes256CbcDec::new_from_slices(aes_keys.key(), aes_keys.iv())?;
+  if let Err(err) = try_install_modpack(mc_dir, aes_decoder, &local_modpack_path, chosen_optionals) {
+    error!("Failed to install modpack: {}", err);
+    fs::remove_file(&local_modpack_path)?;
+    fs::remove_file(&local_modpack_sig_path)?;
+    return Err(format!("Failed to install modpack: {err}").into());
+  }
+  Ok(())
+}
+
+fn try_install_modpack(
+  mc_dir: &PathBuf,
+  aes_decoder: Decryptor<Aes256>,
+  local_modpack_path: &PathBuf,
+  chosen_optionals: Vec<String>
+) -> Result<(), Box<dyn std::error::Error>> {
+  info!("Decoding modpack...");
+  let mut bytes = fs::read(&local_modpack_path)?;
+  let decoded = aes_decoder.decrypt_padded_mut::<Pkcs7>(&mut bytes).map_err(|err| format!("Failed to decrypt modpack: {err}"))?;
+  let archive = ZipArchive::new(Cursor::new(decoded)).map_err(|err| format!("Failed to open modpack archive: {err}"))?;
+
+  info!("Installing modpack...");
+  let mut modpack = ModpackArchiveReader::try_from(archive)?;
+  modpack.install(mc_dir, chosen_optionals)?;
+  info!("Modpack installed!");
+  Ok(())
+}
