@@ -98,11 +98,11 @@ impl LauncherConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum Authentication {
+  Msa(MsaMojangAuth),
   Offline {
     username: String,
     uuid: String,
   },
-  Msa(MsaMojangAuth),
 }
 
 impl TryInto<Box<dyn UserAuthentication + Send + Sync>> for Authentication {
