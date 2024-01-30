@@ -76,6 +76,7 @@ impl Serialize for TauriError {
   }
 }
 
+// TODO: add shared program state (Idle, Downloading, Running, Loading (when the frontend waits for the data to arrive))
 #[tauri::command]
 async fn start_game(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> Result<(), TauriError> where Window: Sync {
   let window = Arc::new(window);
@@ -142,6 +143,7 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
   let mc_dir = GAME_DIR_PATH.clone();
   let java_path = mc_dir.join("jre-runtime");
   let java_executable_path = java_path.join("bin").join("java.exe");
+  // TODO: remove these debug messages
   info!(" \\--Game Version: {:?}", &MINECRAFT_FORGE_VERSION);
   info!(" \\--MC Directory: {}", &mc_dir.to_str().unwrap());
   info!(" \\--Java Path: {}", &java_path.to_str().unwrap());
@@ -194,6 +196,7 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     .build()
     .map_err(|err| TauriError::Other(format!("Failed to create game options: {err}")))?;
 
+  // TODO: VersionManager refresh takes a lot to get remote version list. try to fetch them at the start of the program
   let mut process = MinecraftGameRunner::new(game_opts)
     .launch().await
     .map_err(|err| TauriError::Other(format!("Failed to launch the game: {err}")))?;
