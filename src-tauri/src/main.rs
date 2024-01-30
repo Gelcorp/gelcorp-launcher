@@ -19,7 +19,7 @@ use std::{
   collections::VecDeque,
 };
 
-use config::{ Authentication, LauncherConfig, MsaMojangAuth };
+use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
 use forge_downloader::{
   forge_client_install::ForgeClientInstall,
   download_utils::forge::ForgeVersionHandler,
@@ -160,7 +160,7 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
       .iter()
       .map(|p| ModpackProvider::new(p))
       .collect();
-    modpack_downloader::install_modpack_if_necessary(&mc_dir, providers, selected_options).await?;
+    modpack_downloader::install_modpack_if_necessary(monitor.clone(), &mc_dir, providers, selected_options).await?;
   }
 
   let (forge_installer_path, forge_version_name) = check_forge(&mc_dir, &java_executable_path).await?;

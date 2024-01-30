@@ -1,15 +1,16 @@
 pub mod keys;
 
-use std::{ fs::{ self, create_dir_all }, io::{ Cursor, Write }, path::PathBuf, time::Duration };
+use std::{ fs::{ self, create_dir_all }, io::{ Cursor, Write }, path::PathBuf, sync::Arc, time::Duration };
 
 use aes::{ cipher::{ block_padding::Pkcs7, BlockDecryptMut, KeyIvInit }, Aes256 };
 use cbc::Decryptor;
 use chrono::Utc;
 use futures::StreamExt;
 use gelcorp_modpack::{ reader::zip::ModpackArchiveReader, types::ModOptional };
-use log::{ error, info, warn };
+use log::{ debug, error, info, warn };
+use minecraft_launcher_core::progress_reporter::ProgressReporter;
 use reqwest::{ Url, Client, ClientBuilder };
-use rsa::{ sha2::Sha256, Pkcs1v15Sign, RsaPublicKey };
+use rsa::{ sha2::Sha256, Pkcs1v15Sign };
 use serde::{ Deserialize, Serialize };
 use sha1::Digest;
 use tokio::{ fs::File, io::{ AsyncWriteExt, BufWriter, self } };
@@ -74,7 +75,7 @@ impl ModpackProvider {
     Ok(modpack_info)
   }
 
-  pub async fn reconstruct_encrypted_modpack(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+  pub async fn reconstruct_encrypted_modpack(&self, monitor: Arc<ProgressReporter>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let ModpackInfo { parts, .. } = self.fetch_info().await?;
     assert!(!parts.is_empty(), "No modpack parts provided");
     let tmp_dir = std::env::temp_dir().join(format!("modpack-{}", Utc::now().timestamp_millis()));
@@ -92,27 +93,35 @@ impl ModpackProvider {
     }
 
     // TODO: concurrency!!!
+    monitor.set("Downloading modpack parts", 0, parts.len() as u32);
+    let mut progress = 0;
     for file_name in &parts {
       let mut attempts = 0;
-      let url = self.base_url.join(&file_name)?;
-      let target = tmp_dir.join(&file_name);
+      let url = self.base_url.join(file_name)?;
+      let target = tmp_dir.join(file_name);
       while attempts < 5 {
-        info!("Downloading {} (attempt {})", &file_name, attempts + 1);
-        if let Err(e) = download_part(&self.client, &url, &target).await {
-          error!("Error downloading {}: {}", &file_name, e);
+        info!("Downloading {} (attempt {})", file_name, attempts + 1);
+        let result = download_part(&self.client, &url, &target).await;
+        if let Err(e) = result {
+          error!("Error downloading {}: {}", file_name, e);
           attempts += 1;
-        } else {
-          break;
+          continue;
         }
+        progress += 1;
+        monitor.set_progress(progress);
+        break;
       }
     }
 
     // Join parts
+    monitor.set_progress(0);
+    monitor.set_status("Joining modpack parts");
     let mut buf = vec![];
-    for file_name in &parts {
+    for (i, file_name) in parts.iter().enumerate() {
       let file = File::open(tmp_dir.join(&file_name)).await?;
       let mut reader = BufWriter::new(file);
       io::copy(&mut reader, &mut buf).await?;
+      monitor.set_progress((i + 1) as u32);
     }
 
     Ok(buf)
@@ -135,7 +144,12 @@ fn get_local_modpack_enc_hash(local_modpack_path: &PathBuf) -> Result<[u8; 32], 
   Ok(sum.into())
 }
 
-pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<ModpackProvider>, chosen_optionals: Vec<String>) -> Result<(), StdError> {
+pub async fn install_modpack_if_necessary(
+  monitor: Arc<ProgressReporter>,
+  mc_dir: &PathBuf,
+  providers: Vec<ModpackProvider>,
+  chosen_optionals: Vec<String>
+) -> Result<(), StdError> {
   let (public_key, aes_keys) = (get_public_key()?, get_aes_keys()?);
 
   let local_modpack_dir_path = mc_dir.join("modpack");
@@ -144,6 +158,7 @@ pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<Modpa
   let local_modpack_sig_path = local_modpack_dir_path.join("modpack.enc.sig");
 
   if local_modpack_path.is_file() && local_modpack_sig_path.is_file() {
+    monitor.set("Verifying local modpack", 0, 1);
     info!("Local modpack found! Verifying...");
     let signature = fs::read(&local_modpack_sig_path)?;
     let local_modpack_sha256 = get_local_modpack_enc_hash(&local_modpack_path)?;
@@ -152,6 +167,7 @@ pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<Modpa
       fs::remove_file(&local_modpack_path)?;
       fs::remove_file(&local_modpack_sig_path)?;
     }
+    monitor.set_progress(1);
   }
 
   let local_modpack_sha256 = get_local_modpack_enc_hash(&local_modpack_path).ok();
@@ -159,7 +175,9 @@ pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<Modpa
   let mut provider_success = false;
   let mut should_install = false;
   info!("Checking for updates...");
-  for provider in &providers {
+  let total_providers = providers.len() as u32;
+  for (i, provider) in providers.iter().enumerate() {
+    monitor.set(format!("Trying modpack provider {} ({}/{})", provider.base_url.as_str(), i + 1, total_providers), i as u32, total_providers);
     info!(" - Trying provider '{}'", provider.base_url);
     let remote_info = provider.fetch_info().await;
     if let Err(err) = remote_info {
@@ -190,7 +208,8 @@ pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<Modpa
 
     // Download it
     info!("   Downloading modpack...");
-    let remote_modpack = provider.reconstruct_encrypted_modpack().await?;
+    let remote_modpack = provider.reconstruct_encrypted_modpack(monitor.clone()).await?;
+    monitor.clear();
 
     // Verify installation
     info!("   Remote modpack downloaded! Verifying checksum...");
@@ -213,6 +232,7 @@ pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<Modpa
     info!("Modpack download completed!");
     break;
   }
+  monitor.clear();
   if !local_modpack_path.is_file() || !provider_success {
     if !provider_success {
       error!("All providers failed! Quitting...");
@@ -222,6 +242,7 @@ pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<Modpa
   }
 
   // TODO: Remove this, check if optionals change, or execute each time (because of replace = true config files ???)
+  debug!("Should the modpack be installed? {}", should_install); // TODO: remove, just to stop the warning
   should_install = true;
 
   if !should_install {
@@ -229,12 +250,15 @@ pub async fn install_modpack_if_necessary(mc_dir: &PathBuf, providers: Vec<Modpa
   }
 
   let aes_decoder = Aes256CbcDec::new_from_slices(aes_keys.key(), aes_keys.iv())?;
+  monitor.set("Installing modpack", 0, 1);
   if let Err(err) = try_install_modpack(mc_dir, aes_decoder, &local_modpack_path, chosen_optionals) {
     error!("Failed to install modpack: {}", err);
     fs::remove_file(&local_modpack_path)?;
     fs::remove_file(&local_modpack_sig_path)?;
+    monitor.clear();
     return Err(format!("Failed to install modpack: {err}").into());
   }
+  monitor.set_progress(1);
   Ok(())
 }
 
