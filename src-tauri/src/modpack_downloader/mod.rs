@@ -42,7 +42,7 @@ manifest.json
   - format_version: 1    // Format version of deserializer
 */
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModpackInfo {
   pub parts: Vec<String>,

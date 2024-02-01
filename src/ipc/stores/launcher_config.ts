@@ -16,6 +16,7 @@ export type OfflineAuthentication = { username: string; uuid: string };
 export type LauncherConfig = {
   authentication?: OfflineAuthentication | MsaAuthentication;
   memory_max: number;
+  selected_options?: string[];
 };
 
 /**

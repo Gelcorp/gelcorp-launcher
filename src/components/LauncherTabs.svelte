@@ -2,6 +2,7 @@
   import GameLogsTab from "$/components/tab/GameLogsTab.svelte";
   import LauncherLogsTab from "$/components/tab/LauncherLogsTab.svelte";
   import UpdateNotesTab from "$/components/tab/UpdateNotesTab.svelte";
+  import ConfigTab from "./tab/ConfigTab.svelte";
 
   import { launcherConfigStore } from "$/ipc/stores/launcher_config";
 
@@ -12,6 +13,7 @@
     { label: "Notas de Actualización", tab: UpdateNotesTab },
     { label: "Logs del Launcher", tab: LauncherLogsTab },
     { label: `Logs del Juego (${username})`, tab: GameLogsTab },
+    { label: "Configuración", tab: ConfigTab },
   ];
 
   function select(index: number) {

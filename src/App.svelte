@@ -8,7 +8,7 @@
   // Keep this active TODO: remove
   gameLogsStore.subscribe(() => {});
 
-  const authenticated = $launcherConfigStore.authentication !== undefined;
+  $: authenticated = $launcherConfigStore?.authentication !== undefined;
 </script>
 
 {#if authenticated}

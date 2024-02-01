@@ -33,11 +33,13 @@ use minecraft_launcher_core::{
   versions::info::MCVersion,
   MinecraftGameRunner,
 };
+use modpack_downloader::ModpackInfo;
 use once_cell::sync::Lazy;
 use regex::{ Captures, Regex };
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::json;
+use sysinfo::System;
 use tauri::{ Window, Manager, Builder, State };
 
 use thiserror::Error;
@@ -74,6 +76,25 @@ impl Serialize for TauriError {
   fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
     serializer.serialize_str(&self.to_string())
   }
+}
+
+#[tauri::command]
+async fn fetch_modpack_info(state: State<'_, Mutex<LauncherConfig>>) -> Result<ModpackInfo, TauriError> {
+  let providers = {
+    let state = state.lock().unwrap();
+    state.providers.clone()
+  };
+  for provider in &providers {
+    if let Ok(info) = ModpackProvider::new(&provider).fetch_info().await {
+      return Ok(info);
+    }
+  }
+  Err(TauriError::Other("Failed to get modpack info".into()))
+}
+
+#[tauri::command]
+fn get_system_memory() -> u64 {
+  System::new_all().total_memory()
 }
 
 // TODO: add shared program state (Idle, Downloading, Running, Loading (when the frontend waits for the data to arrive))
@@ -322,7 +343,18 @@ async fn main() {
       Ok(())
     })
     .manage(Mutex::new(LauncherConfig::load_from_file().await))
-    .invoke_handler(tauri::generate_handler![start_game, get_launcher_logs_cache, get_launcher_config, set_launcher_config, login_offline, login_msa])
+    .invoke_handler(
+      tauri::generate_handler![
+        start_game,
+        get_launcher_logs_cache,
+        get_launcher_config,
+        set_launcher_config,
+        login_offline,
+        login_msa,
+        fetch_modpack_info,
+        get_system_memory
+      ]
+    )
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

@@ -3,23 +3,20 @@
   import ProgressBar from "$/components/ProgressBar.svelte";
   import { gameLogsStore, launcherLogsStore } from "$/ipc/stores/loggers";
   import { progressStore } from "$/ipc/stores/progress";
-  import { launchGame } from "$/ipc/game";
+  import { gameStatusStore } from "$/ipc/stores/game_status";
 
   let selectedTab = 0;
 
-  let isRunning = false;
+  $: isRunning = $gameStatusStore.isRunning;
   function handleClick() {
     if (isRunning) return;
-    isRunning = true;
     gameLogsStore.clear();
 
     selectedTab = 1;
-    launchGame()
-      .catch((e) => {
-        console.error(e);
-        launcherLogsStore.log("Failed to launch the game: " + e);
-      })
-      .finally(() => (isRunning = false));
+    gameStatusStore.startGame().catch((e) => {
+      console.error(e);
+      launcherLogsStore.log("Failed to launch the game: " + e);
+    });
   }
 </script>
 
