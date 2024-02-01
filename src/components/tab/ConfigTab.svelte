@@ -2,10 +2,10 @@
   import { totalMemoryStore } from "$/ipc/stores/system_info";
   import { launcherConfigStore } from "$/ipc/stores/launcher_config";
   import { modpackInfoStore, type Optional } from "$/ipc/stores/modpack_info";
-  import { gameStatusStore } from "$/ipc/stores/game_status";
+  import { gameStatusStore, GameStatus } from "$/ipc/stores/game_status";
   import RamSlider from "../RamSlider.svelte";
 
-  $: gameRunning = $gameStatusStore.isRunning;
+  $: gameRunning = $gameStatusStore !== GameStatus.Idle;
 
   $: optionals = $modpackInfoStore?.optionals ?? [];
   let incompatibilities: { [key: string]: Optional[] } = {};

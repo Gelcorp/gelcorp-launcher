@@ -3,11 +3,11 @@
   import ProgressBar from "$/components/ProgressBar.svelte";
   import { gameLogsStore, launcherLogsStore } from "$/ipc/stores/loggers";
   import { progressStore } from "$/ipc/stores/progress";
-  import { gameStatusStore } from "$/ipc/stores/game_status";
+  import { GameStatus, gameStatusStore } from "$/ipc/stores/game_status";
 
   let selectedTab = 0;
 
-  $: isRunning = $gameStatusStore.isRunning;
+  $: isRunning = $gameStatusStore !== GameStatus.Idle;
   function handleClick() {
     if (isRunning) return;
     gameLogsStore.clear();
@@ -36,7 +36,9 @@
         <img src="gelcorp-title.png" alt="Logo de Gelcorp" />
       </div>
       <div class="right">
-        <button class="main-btn" on:click={handleClick} disabled={isRunning}>Jugar</button>
+        <button class="main-btn" on:click={handleClick} disabled={isRunning}>
+          {$gameStatusStore === GameStatus.Idle ? "Jugar" : $gameStatusStore === GameStatus.Downloading ? "Descargando" : "Jugando"}
+        </button>
       </div>
     </div>
   </section>
@@ -67,7 +69,9 @@
     background-color: #2a632a;
     border: 2px solid #1c421c;
     font-size: 2.5rem;
-    padding: 0.2rem 1.8rem;
+    text-align: center;
+    width: 177.6px;
+    height: 66.4px;
     font-family: "Minecraft Ten";
     text-transform: uppercase;
     font-weight: 800;
@@ -77,6 +81,9 @@
   .main-btn:disabled {
     background-color: #5c5e5c;
     border: 2px solid #3a3b3a;
+
+    /* For states */
+    font-size: 1.45rem;
   }
 
   .main-btn:hover:not(:disabled) {

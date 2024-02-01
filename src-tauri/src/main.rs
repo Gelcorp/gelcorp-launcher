@@ -6,6 +6,7 @@ mod config;
 mod logger;
 mod java;
 mod modpack_downloader;
+mod game_status;
 
 use std::{
   path::{ PathBuf, Path },
@@ -25,6 +26,7 @@ use forge_downloader::{
   download_utils::forge::ForgeVersionHandler,
   forge_installer_profile::ForgeVersionInfo,
 };
+use game_status::{ GameStatus, GameStatusState };
 use log::{ info, debug, error };
 use minecraft_launcher_core::{
   options::{ GameOptionsBuilder, LauncherOptions },
@@ -50,6 +52,8 @@ use crate::{ java::{ download_java, check_java_dir }, logger::{ LauncherAppender
 static LAUNCHER_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
 static LAUNCHER_LOGS_CACHE: Lazy<Arc<Mutex<VecDeque<String>>>> = Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
 static GAME_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
+
+static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(|| GameStatusState::new());
 
 const LAUNCHER_NAME: &str = env!("LAUNCHER_NAME");
 const LAUNCHER_VERSION: &str = env!("LAUNCHER_VERSION");
@@ -97,7 +101,6 @@ fn get_system_memory() -> u64 {
   System::new_all().total_memory()
 }
 
-// TODO: add shared program state (Idle, Downloading, Running, Loading (when the frontend waits for the data to arrive))
 #[tauri::command]
 async fn start_game(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> Result<(), TauriError> where Window: Sync {
   let window = Arc::new(window);
@@ -106,6 +109,7 @@ async fn start_game(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> 
   if let Err(err) = &res {
     error!("Failed to start game: {}", err);
   }
+  GAME_STATUS_STATE.set(GameStatus::Idle);
   res
 }
 
@@ -164,11 +168,8 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
   let mc_dir = GAME_DIR_PATH.clone();
   let java_path = mc_dir.join("jre-runtime");
   let java_executable_path = java_path.join("bin").join("java.exe");
-  // TODO: remove these debug messages
-  info!(" \\--Game Version: {:?}", &MINECRAFT_FORGE_VERSION);
-  info!(" \\--MC Directory: {}", &mc_dir.to_str().unwrap());
-  info!(" \\--Java Path: {}", &java_path.to_str().unwrap());
 
+  GAME_STATUS_STATE.set(GameStatus::Downloading);
   debug!("Checking java runtime...");
   if !check_java_dir(&java_path) {
     info!("Java runtime not found. Downloading...");
@@ -222,6 +223,7 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     .launch().await
     .map_err(|err| TauriError::Other(format!("Failed to launch the game: {err}")))?;
 
+  GAME_STATUS_STATE.set(GameStatus::Playing);
   loop {
     let mut buf = String::new();
     if let Ok(length) = process.stdout().read_line(&mut buf) {
@@ -252,6 +254,11 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
       }
     }
   }
+}
+
+#[tauri::command]
+fn get_game_status() -> GameStatus {
+  GAME_STATUS_STATE.get()
 }
 
 #[tauri::command]
@@ -330,6 +337,8 @@ async fn main() {
   Builder::default()
     .setup(|app| {
       let win = app.get_window("main").unwrap();
+      GAME_STATUS_STATE.set_window(win.clone());
+
       let builder = thread::Builder::new();
       builder
         .name("launcher-log-watcher".to_owned())
@@ -352,7 +361,8 @@ async fn main() {
         login_offline,
         login_msa,
         fetch_modpack_info,
-        get_system_memory
+        get_system_memory,
+        get_game_status
       ]
     )
     .run(tauri::generate_context!())
