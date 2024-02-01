@@ -1,64 +1,57 @@
 <script lang="ts">
-  import ProgressBar from "./lib/ProgressBar.svelte";
-  import { invoke } from "@tauri-apps/api/tauri";
+  import ProgressBar from "$/components/ProgressBar.svelte";
+  import { loginCracked, loginMicrosoft } from "$/ipc/auth";
 
   let logging_in = false;
   let login_error: string | undefined;
-
-  let username_re = /[a-zA-Z0-9_]{3,16}/;
   let username: string;
 
-  async function loginOffline() {
+  const isValidUsername = (username: string) => /[a-zA-Z0-9_]{3,16}/.test(username);
+
+  function loginOffline() {
     if (!username || logging_in) return;
-    if (!username_re.test(username)) {
+    if (!isValidUsername(username)) {
       login_error = "El nombre de usuario no es valido. Puedes usar unicamente letras, numeros y guiones bajos. Mínimo 3 caracteres y máximo 16.";
       return;
     }
     logging_in = true;
     login_error = undefined;
 
-    setTimeout(async () => {
-      try {
-        await invoke("login_offline", { username });
-      } catch (e) {
-        console.error(e);
-        login_error = e + "";
-      } finally {
-        logging_in = false;
-      }
+    setTimeout(() => {
+      loginCracked(username)
+        .catch((e) => (login_error = String(e)))
+        .finally(() => (logging_in = false));
     }, Math.random() * 200);
   }
 
-  async function loginMsa() {
+  function loginMsa() {
     if (logging_in) return;
     logging_in = true;
     login_error = undefined;
 
-    try {
-      await invoke("login_msa");
-    } catch (e) {
-      console.error(e);
-      login_error = e + "";
-    } finally {
-      logging_in = false;
-    }
+    loginMicrosoft()
+      .catch((e) => (login_error = String(e)))
+      .finally(() => (logging_in = false));
   }
 </script>
 
 <main>
   <form on:submit|preventDefault={loginOffline} class="container">
-    <div class="img-container">
+    <section class="img-container">
       <img src="gelcorp-title.png" alt="" />
       {#if login_error}
         <label for="username"><i>({login_error})</i></label>
       {/if}
-    </div>
+    </section>
+
     <label for="username">Usuario:</label>
-    <input name="username" id="username" bind:value={username} type="text" autocomplete="off" spellcheck="false" />
-    <div class="btn-container">
+    <input name="username" bind:value={username} type="text" autocomplete="off" spellcheck="false" />
+
+    <section class="btn-container">
       <button type="submit">Iniciar sesion</button>
       <button on:click|preventDefault={loginMsa}>Iniciar sesión con Microsoft</button>
-    </div>
+    </section>
+
     {#if logging_in}
       <div class="progressbar-container">
         <ProgressBar progress={-1} --height="6px" />
@@ -96,7 +89,6 @@
     align-items: stretch;
     width: 42vw;
     max-width: 340px;
-    /* text-align: center; */
   }
 
   .container label {

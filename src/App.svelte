@@ -1,10 +1,17 @@
 <script>
-  import MainPage from "./MainPage.svelte";
-  import LoginPage from "./LoginPage.svelte";
-  import { launcherConfigStore } from "./stores/launcher_config";
+  import MainPage from "$/pages/MainPage.svelte";
+  import LoginPage from "$/pages/LoginPage.svelte";
+
+  import { launcherConfigStore } from "$/ipc/stores/launcher_config";
+  import { gameLogsStore } from "./ipc/stores/loggers";
+
+  // Keep this active TODO: remove
+  gameLogsStore.subscribe(() => {});
+
+  const authenticated = $launcherConfigStore.authentication !== undefined;
 </script>
 
-{#if $launcherConfigStore.authentication}
+{#if authenticated}
   <MainPage />
 {:else}
   <LoginPage />

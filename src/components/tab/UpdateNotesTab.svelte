@@ -1,10 +1,11 @@
 <script lang="ts">
-  import type { MsaAuthentication } from "./../../stores/launcher_config";
-  import { launcherConfigStore } from "./../../stores/launcher_config";
+  import { type MsaAuthentication, launcherConfigStore } from "$/ipc/stores/launcher_config";
 
-  let is_premium = ($launcherConfigStore.authentication as MsaAuthentication).msa_access_token !== undefined;
-  let username = $launcherConfigStore.authentication?.username;
-  let uuid = $launcherConfigStore.authentication?.uuid;
+  // Checked at <App />
+  let auth = $launcherConfigStore.authentication!;
+
+  let is_premium = (auth as MsaAuthentication).msa_access_token !== undefined;
+  let { username, uuid } = auth;
 </script>
 
 <main>
@@ -24,7 +25,7 @@
     </article>
   </div>
   <aside>
-    <div>
+    <section>
       <h3>Información del Jugador</h3>
       <div class="user-info">
         <img class="avatar" src="https://crafatar.com/avatars/{uuid}?overlay=true?size=64" alt="avatar" draggable="false" />
@@ -36,7 +37,7 @@
           <button on:click={launcherConfigStore.logout}>Cerrar Sesión</button>
         </div>
       </div>
-    </div>
+    </section>
   </aside>
 </main>
 

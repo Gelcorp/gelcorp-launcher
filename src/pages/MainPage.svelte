@@ -1,60 +1,48 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { listen } from "@tauri-apps/api/event";
-  import { invoke } from "@tauri-apps/api/tauri";
-  import { gameLogsStore, launcherLogsStore } from "./stores/loggers";
+  import LauncherTabs from "$/components/LauncherTabs.svelte";
+  import ProgressBar from "$/components/ProgressBar.svelte";
+  import { gameLogsStore, launcherLogsStore } from "$/ipc/stores/loggers";
+  import { progressStore } from "$/ipc/stores/progress";
+  import { launchGame } from "$/ipc/game";
 
-  import LauncherTabs from "./lib/LauncherTabs.svelte";
-  import ProgressBar from "./lib/ProgressBar.svelte";
+  let selectedTab = 0;
 
-  let progress: { status: string; current: number; total: number } | undefined;
-
-  // Keep this active
-  gameLogsStore.subscribe(() => {});
-
-  let playButton: HTMLButtonElement;
-  async function startGame() {
-    if (playButton.disabled) return;
-    playButton.disabled = true;
+  let isRunning = false;
+  function handleClick() {
+    if (isRunning) return;
+    isRunning = true;
     gameLogsStore.clear();
 
-    try {
-      await invoke("start_game");
-    } catch (e) {
-      console.error(e);
-      launcherLogsStore.log("Failed to launch the game: " + e);
-    } finally {
-      playButton.disabled = false;
-    }
+    selectedTab = 1;
+    launchGame()
+      .catch((e) => {
+        console.error(e);
+        launcherLogsStore.log("Failed to launch the game: " + e);
+      })
+      .finally(() => (isRunning = false));
   }
-
-  onMount(() => {
-    const unlisten = listen("update_progress", ({ payload }) => {
-      progress = payload as { status: string; current: number; total: number } | undefined;
-    });
-    return () => unlisten.then((fn) => fn());
-  });
 </script>
 
 <main class="container">
   <div class="upper">
-    <LauncherTabs />
+    <LauncherTabs bind:selectedTab />
   </div>
-  <div class="lower">
-    {#if progress}
+  <section class="lower">
+    {#if $progressStore}
       <div class="progressbar-container">
-        <ProgressBar info={progress?.status} progress={progress?.current / progress?.total} --height="14px" --bar-color="#0078d7" />
+        <ProgressBar info={$progressStore?.status} progress={$progressStore?.current / $progressStore?.total} --height="14px" --bar-color="#0078d7" />
       </div>
     {/if}
+
     <div class="lower-parts">
       <div class="left">
-        <img src="gelcorp-title.png" alt="logo" draggable="false" />
+        <img src="gelcorp-title.png" alt="Logo de Gelcorp" />
       </div>
       <div class="right">
-        <button class="main-btn" bind:this={playButton} on:click={startGame}>Jugar</button>
+        <button class="main-btn" on:click={handleClick} disabled={isRunning}>Jugar</button>
       </div>
     </div>
-  </div>
+  </section>
 </main>
 
 <style>
@@ -73,8 +61,6 @@
 
   .upper {
     display: grid;
-    /* place-content: center; */
-    /* align-items: center; */
     justify-content: stretch;
     align-content: stretch;
     overflow: hidden;

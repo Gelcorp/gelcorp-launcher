@@ -1,32 +1,34 @@
 <script lang="ts">
-  import GameLogsTab from "./tab/GameLogsTab.svelte";
-  import LauncherLogsTab from "./tab/LauncherLogsTab.svelte";
-  import UpdateNotesTab from "./tab/UpdateNotesTab.svelte";
-  import { launcherConfigStore } from "../stores/launcher_config";
+  import GameLogsTab from "$/components/tab/GameLogsTab.svelte";
+  import LauncherLogsTab from "$/components/tab/LauncherLogsTab.svelte";
+  import UpdateNotesTab from "$/components/tab/UpdateNotesTab.svelte";
 
-  let username = $launcherConfigStore.authentication?.username;
+  import { launcherConfigStore } from "$/ipc/stores/launcher_config";
+
+  export let selectedTab = 0;
+
+  let { username } = $launcherConfigStore.authentication!;
   let tabs = [
     { label: "Notas de Actualización", tab: UpdateNotesTab },
     { label: "Logs del Launcher", tab: LauncherLogsTab },
     { label: `Logs del Juego (${username})`, tab: GameLogsTab },
   ];
-  let selected = 0;
 
   function select(index: number) {
-    selected = index % tabs.length;
+    selectedTab = index % tabs.length;
   }
 </script>
 
 <div class="tabs">
   <nav>
-    {#each tabs as tab, i}
-      <button class:selected={i === selected} on:click={() => select(i)}>{tab.label}</button>
+    {#each tabs as { label }, i}
+      <button class:selected={i === selectedTab} on:click={() => select(i)}>{label}</button>
     {/each}
   </nav>
   <main>
-    <div class="tab">
-      <svelte:component this={tabs[selected].tab} />
-    </div>
+    <section class="tab">
+      <svelte:component this={tabs[selectedTab].tab} />
+    </section>
   </main>
 </div>
 
