@@ -9,15 +9,15 @@ mod modpack_downloader;
 mod game_status;
 
 use std::{
-  path::{ PathBuf, Path },
+  collections::VecDeque,
+  env,
+  fs::{ self, create_dir_all, File },
   io::BufRead,
+  ops::DerefMut,
+  path::{ Path, PathBuf },
   sync::{ Arc, Mutex },
   thread::{ self, sleep },
   time::Duration,
-  fs::{ self, File, create_dir_all },
-  env,
-  ops::DerefMut,
-  collections::VecDeque,
 };
 
 use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
@@ -47,7 +47,11 @@ use tauri::{ Window, Manager, Builder, State };
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{ java::{ download_java, check_java_dir }, logger::{ LauncherAppender, setup_logger }, modpack_downloader::ModpackProvider };
+use crate::{
+  java::{ check_java_dir, download_java },
+  logger::{ setup_logger, LauncherAppender },
+  modpack_downloader::{ ModpackDownloader, ModpackProvider },
+};
 
 static LAUNCHER_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
 static LAUNCHER_LOGS_CACHE: Lazy<Arc<Mutex<VecDeque<String>>>> = Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
@@ -58,8 +62,6 @@ static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(|| GameStatusState::
 const LAUNCHER_NAME: &str = env!("LAUNCHER_NAME");
 const LAUNCHER_VERSION: &str = env!("LAUNCHER_VERSION");
 const GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path(&env!("GAME_DIR_PATH")));
-
-const MINECRAFT_FORGE_VERSION: (&str, &str) = ("1.20.1", "47.2.0");
 
 type StdError = Box<dyn std::error::Error>;
 
@@ -83,17 +85,10 @@ impl Serialize for TauriError {
 }
 
 #[tauri::command]
-async fn fetch_modpack_info(state: State<'_, Mutex<LauncherConfig>>) -> Result<ModpackInfo, TauriError> {
-  let providers = {
-    let state = state.lock().unwrap();
-    state.providers.clone()
-  };
-  for provider in &providers {
-    if let Ok(info) = ModpackProvider::new(&provider).fetch_info().await {
-      return Ok(info);
-    }
-  }
-  Err(TauriError::Other("Failed to get modpack info".into()))
+async fn fetch_modpack_info(modpack_downloader: State<'_, futures::lock::Mutex<ModpackDownloader>>) -> Result<ModpackInfo, TauriError> {
+  let mut downloader = modpack_downloader.lock().await;
+  let modpack_info = downloader.get_or_fetch_modpack_info().await?;
+  Ok(modpack_info.clone())
 }
 
 #[tauri::command]
@@ -102,9 +97,15 @@ fn get_system_memory() -> u64 {
 }
 
 #[tauri::command]
-async fn start_game(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> Result<(), TauriError> where Window: Sync {
+async fn start_game(
+  state: State<'_, Mutex<LauncherConfig>>,
+  modpack_downloader: State<'_, futures::lock::Mutex<ModpackDownloader>>,
+  window: Window
+) -> Result<(), TauriError>
+  where Window: Sync
+{
   let window = Arc::new(window);
-  let res = real_start_game(state, window.clone()).await.map_err(|e| e.into());
+  let res = real_start_game(state, modpack_downloader, window.clone()).await.map_err(|e| e.into());
   flush_launcher_logs(&window);
   if let Err(err) = &res {
     error!("Failed to start game: {}", err);
@@ -120,7 +121,13 @@ pub struct DownloadProgress {
   pub total: u32,
 }
 
-async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Window>) -> Result<(), StdError> where Window: Sync {
+async fn real_start_game(
+  state: State<'_, Mutex<LauncherConfig>>,
+  modpack_downloader: State<'_, futures::lock::Mutex<ModpackDownloader>>,
+  window: Arc<Window>
+) -> Result<(), StdError>
+  where Window: Sync
+{
   let authentication = {
     let config = state.lock().unwrap();
     let authentication = config.authentication.as_ref();
@@ -177,17 +184,15 @@ async fn real_start_game(state: State<'_, Mutex<LauncherConfig>>, window: Arc<Wi
     info!("Java downloaded successfully!");
   }
 
+  let mut downloader = modpack_downloader.lock().await;
   {
     debug!("Checking modpack...");
-    let LauncherConfig { selected_options, providers, .. } = state.lock().unwrap().clone();
-    let providers: Vec<ModpackProvider> = providers
-      .iter()
-      .map(|p| ModpackProvider::new(p))
-      .collect();
-    modpack_downloader::install_modpack_if_necessary(monitor.clone(), &mc_dir, providers, selected_options).await?;
+    let LauncherConfig { selected_options, .. } = state.lock().unwrap().clone();
+    downloader.download_and_install(monitor.clone(), selected_options).await?;
   }
 
-  let (forge_installer_path, forge_version_name) = check_forge(&mc_dir, &java_executable_path).await?;
+  let ModpackInfo { minecraft_version, forge_version, .. } = downloader.get_or_fetch_modpack_info().await?;
+  let (forge_installer_path, forge_version_name) = check_forge(&mc_dir, &minecraft_version, &forge_version, &java_executable_path).await?;
   info!("Forge Version: {}", &forge_version_name);
 
   let auth: Box<dyn UserAuthentication + Send + Sync> = authentication.try_into()?;
@@ -334,6 +339,12 @@ async fn main() {
     })
   );
 
+  let launcher_config = LauncherConfig::load_from_file().await;
+  let providers: Vec<ModpackProvider> = launcher_config.providers
+    .iter()
+    .map(|p| ModpackProvider::new(p))
+    .collect();
+
   Builder::default()
     .setup(|app| {
       let win = app.get_window("main").unwrap();
@@ -351,7 +362,8 @@ async fn main() {
         .expect("Failed to spawn log watcher thread");
       Ok(())
     })
-    .manage(Mutex::new(LauncherConfig::load_from_file().await))
+    .manage(Mutex::new(launcher_config))
+    .manage(futures::lock::Mutex::new(ModpackDownloader::new(GAME_DIR_PATH.to_path_buf(), providers)))
     .invoke_handler(
       tauri::generate_handler![
         start_game,
@@ -369,16 +381,16 @@ async fn main() {
     .expect("error while running tauri application");
 }
 
-async fn check_forge(mc_dir: &PathBuf, java_path: &PathBuf) -> Result<(PathBuf, String), TauriError> {
+async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str, java_path: &PathBuf) -> Result<(PathBuf, String), TauriError> {
   let versions_dir = mc_dir.join("versions");
 
   // Fetch version
   let version_handler = ForgeVersionHandler::new().await?;
-  let version_info = version_handler.get_by_forge_version(&MINECRAFT_FORGE_VERSION.1).expect("Failed to get forge version");
+  let version_info = version_handler.get_by_forge_version(forge_version).expect("Failed to get forge version");
   let installer_path = version_info.get_artifact().get_local_path(&mc_dir.join("libraries"));
 
   if versions_dir.is_dir() && installer_path.is_file() {
-    let forge_folder_re = Regex::new(&format!("{}.+{}", MINECRAFT_FORGE_VERSION.0, MINECRAFT_FORGE_VERSION.1)).unwrap();
+    let forge_folder_re = Regex::new(&format!("{}.+{}", mc_version, forge_version)).unwrap();
     let forge_version_name = versions_dir
       .read_dir()?
       .into_iter()

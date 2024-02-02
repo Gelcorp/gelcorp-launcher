@@ -42,7 +42,7 @@ manifest.json
   - format_version: 1    // Format version of deserializer
 */
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ModpackInfo {
   pub parts: Vec<String>,
@@ -55,6 +55,7 @@ pub struct ModpackInfo {
   pub signature: String, // Rsa     (hex)
 }
 
+#[derive(Debug, Clone)]
 pub struct ModpackProvider {
   base_url: Url,
   client: Client,
@@ -138,144 +139,163 @@ pub struct LocalInstallInfo {
 type Aes256CbcDec = Decryptor<Aes256>;
 type StdError = Box<dyn std::error::Error>;
 
-fn get_local_modpack_enc_hash(local_modpack_path: &PathBuf) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+pub struct ModpackDownloader {
+  providers: Vec<ModpackProvider>,
+  mc_dir: PathBuf,
+  modpack_info: Option<ModpackInfo>,
+}
+
+impl ModpackDownloader {
+  pub fn new(mc_dir: PathBuf, providers: Vec<ModpackProvider>) -> Self {
+    Self { providers, mc_dir, modpack_info: None }
+  }
+
+  pub async fn get_or_fetch_modpack_info(&mut self) -> Result<&ModpackInfo, StdError> {
+    if self.modpack_info.is_none() {
+      self.modpack_info.replace(self.fetch_latest_modpack_info().await?);
+    }
+    Ok(self.modpack_info.as_ref().unwrap())
+  }
+
+  pub async fn download_and_install(&mut self, monitor: Arc<ProgressReporter>, chosen_optionals: Vec<String>) -> Result<(), StdError> {
+    let (public_key, aes_keys) = (get_public_key()?, get_aes_keys()?);
+
+    let local_modpack_dir_path = &self.mc_dir.join("modpack");
+    // TODO: let local_install_info_path = local_modpack_dir_path.join("install_info.json");
+    let local_modpack_path = local_modpack_dir_path.join("modpack.enc.zip");
+    let local_modpack_sig_path = local_modpack_dir_path.join("modpack.enc.sig");
+
+    if local_modpack_path.is_file() && local_modpack_sig_path.is_file() {
+      monitor.set("Verifying local modpack", 0, 1);
+      info!("Local modpack found! Verifying...");
+      let signature = fs::read(&local_modpack_sig_path)?;
+      let local_modpack_sha256 = get_local_modpack_enc_hash(&local_modpack_path)?;
+      if let Err(_) = public_key.verify(Pkcs1v15Sign::new::<Sha256>(), &local_modpack_sha256, &signature) {
+        warn!("Invalid local modpack! Downloading it again...");
+        fs::remove_file(&local_modpack_path)?;
+        fs::remove_file(&local_modpack_sig_path)?;
+      }
+      monitor.set_progress(1);
+    }
+
+    let local_modpack_sha256 = get_local_modpack_enc_hash(&local_modpack_path).ok();
+
+    let mut provider_success = false;
+    let mut should_install = false;
+    info!("Checking for updates...");
+    let total_providers = self.providers.len() as u32;
+    for (i, provider) in self.providers.iter().enumerate() {
+      monitor.set(format!("Trying modpack provider {} ({}/{})", provider.base_url.as_str(), i + 1, total_providers), i as u32, total_providers);
+      info!(" - Trying provider '{}'", provider.base_url);
+      let remote_info = provider.fetch_info().await;
+      if let Err(err) = remote_info {
+        warn!("   Error checking provider: {}", err);
+        continue;
+      }
+      let remote_info = remote_info?;
+      provider_success = true;
+
+      let remote_checksum = hex::decode(&remote_info.checksum);
+      if let Err(err) = remote_checksum {
+        warn!("   Error decoding remote checksum: {}", err);
+        continue;
+      }
+      let remote_checksum: [u8; 32] = remote_checksum?.try_into().map_err(|_| format!("Checksum is not 32 bytes: {}", remote_info.checksum))?;
+
+      if let Some(local_checksum) = local_modpack_sha256 {
+        info!("   Found local modpack info! Checking for updates...");
+        if local_checksum == remote_checksum {
+          info!("   Local modpack is up to date!");
+          break;
+        }
+        info!("   Local modpack is outdated! Updating...");
+      } else {
+        // No previous modpack downloaded
+        info!("   Modpack not found. Downloading...");
+      }
+
+      // Download it
+      info!("   Downloading modpack...");
+      let remote_modpack = provider.reconstruct_encrypted_modpack(monitor.clone()).await?;
+      monitor.clear();
+
+      // Verify installation
+      info!("   Remote modpack downloaded! Verifying checksum...");
+      let manual_checksum: [u8; 32] = <Sha256 as Digest>::digest(&remote_modpack).into();
+      if manual_checksum != remote_checksum {
+        warn!("   Checksum mismatch. Download failed! (Remote: {}, Downloaded: {})", hex::encode(&remote_checksum), hex::encode(&manual_checksum));
+        continue;
+      }
+
+      let signature = hex::decode(&remote_info.signature)?;
+      if let Err(err) = public_key.verify(Pkcs1v15Sign::new::<Sha256>(), &manual_checksum, &signature) {
+        warn!("   Failed to check signature. Download failed! ({})", err);
+      }
+
+      info!("   Modpack verified! Saving files...");
+      create_dir_all(&local_modpack_dir_path)?;
+      fs::File::create(&local_modpack_path)?.write_all(&remote_modpack)?;
+      fs::File::create(&local_modpack_sig_path)?.write_all(&signature)?;
+      should_install = true;
+      info!("Modpack download completed!");
+      self.modpack_info = Some(remote_info);
+      break;
+    }
+    monitor.clear();
+    if !local_modpack_path.is_file() || !provider_success {
+      if !provider_success {
+        error!("All providers failed! Quitting...");
+      }
+      error!("Failed to download modpack!");
+      return Err("Failed to download modpack".into());
+    }
+
+    // TODO: Remove this, check if optionals change, or execute each time (because of replace = true config files ???)
+    debug!("Should the modpack be installed? {}", should_install); // TODO: remove, just to stop the warning
+    should_install = true;
+
+    if !should_install {
+      return Ok(());
+    }
+
+    let aes_decoder = Aes256CbcDec::new_from_slices(aes_keys.key(), aes_keys.iv())?;
+    monitor.set("Installing modpack", 0, 1);
+    if let Err(err) = self.try_install_modpack(aes_decoder, &local_modpack_path, chosen_optionals) {
+      error!("Failed to install modpack: {}", err);
+      fs::remove_file(&local_modpack_path)?;
+      fs::remove_file(&local_modpack_sig_path)?;
+      monitor.clear();
+      return Err(format!("Failed to install modpack: {err}").into());
+    }
+    monitor.set_progress(1);
+    Ok(())
+  }
+
+  fn try_install_modpack(&self, aes_decoder: Decryptor<Aes256>, local_modpack_path: &PathBuf, chosen_optionals: Vec<String>) -> Result<(), StdError> {
+    info!("Decoding modpack...");
+    let mut bytes = fs::read(&local_modpack_path)?;
+    let decoded = aes_decoder.decrypt_padded_mut::<Pkcs7>(&mut bytes).map_err(|err| format!("Failed to decrypt modpack: {err}"))?;
+    let archive = ZipArchive::new(Cursor::new(decoded)).map_err(|err| format!("Failed to open modpack archive: {err}"))?;
+
+    info!("Installing modpack...");
+    let mut modpack = ModpackArchiveReader::try_from(archive)?;
+    modpack.install(&self.mc_dir, chosen_optionals)?;
+    info!("Modpack installed!");
+    Ok(())
+  }
+
+  async fn fetch_latest_modpack_info(&self) -> Result<ModpackInfo, StdError> {
+    for provider in &self.providers {
+      if let Ok(modpack_info) = provider.fetch_info().await {
+        return Ok(modpack_info);
+      }
+    }
+    Err("No modpack info found".into())
+  }
+}
+
+fn get_local_modpack_enc_hash(local_modpack_path: &PathBuf) -> Result<[u8; 32], StdError> {
   let bytes = fs::read(&local_modpack_path)?;
   let sum = <Sha256 as Digest>::digest(bytes);
   Ok(sum.into())
-}
-
-pub async fn install_modpack_if_necessary(
-  monitor: Arc<ProgressReporter>,
-  mc_dir: &PathBuf,
-  providers: Vec<ModpackProvider>,
-  chosen_optionals: Vec<String>
-) -> Result<(), StdError> {
-  let (public_key, aes_keys) = (get_public_key()?, get_aes_keys()?);
-
-  let local_modpack_dir_path = mc_dir.join("modpack");
-  // TODO: let local_install_info_path = local_modpack_dir_path.join("install_info.json");
-  let local_modpack_path = local_modpack_dir_path.join("modpack.enc.zip");
-  let local_modpack_sig_path = local_modpack_dir_path.join("modpack.enc.sig");
-
-  if local_modpack_path.is_file() && local_modpack_sig_path.is_file() {
-    monitor.set("Verifying local modpack", 0, 1);
-    info!("Local modpack found! Verifying...");
-    let signature = fs::read(&local_modpack_sig_path)?;
-    let local_modpack_sha256 = get_local_modpack_enc_hash(&local_modpack_path)?;
-    if let Err(_) = public_key.verify(Pkcs1v15Sign::new::<Sha256>(), &local_modpack_sha256, &signature) {
-      warn!("Invalid local modpack! Downloading it again...");
-      fs::remove_file(&local_modpack_path)?;
-      fs::remove_file(&local_modpack_sig_path)?;
-    }
-    monitor.set_progress(1);
-  }
-
-  let local_modpack_sha256 = get_local_modpack_enc_hash(&local_modpack_path).ok();
-
-  let mut provider_success = false;
-  let mut should_install = false;
-  info!("Checking for updates...");
-  let total_providers = providers.len() as u32;
-  for (i, provider) in providers.iter().enumerate() {
-    monitor.set(format!("Trying modpack provider {} ({}/{})", provider.base_url.as_str(), i + 1, total_providers), i as u32, total_providers);
-    info!(" - Trying provider '{}'", provider.base_url);
-    let remote_info = provider.fetch_info().await;
-    if let Err(err) = remote_info {
-      warn!("   Error checking provider: {}", err);
-      continue;
-    }
-    let remote_info = remote_info?;
-    provider_success = true;
-
-    let remote_checksum = hex::decode(&remote_info.checksum);
-    if let Err(err) = remote_checksum {
-      warn!("   Error decoding remote checksum: {}", err);
-      continue;
-    }
-    let remote_checksum: [u8; 32] = remote_checksum?.try_into().map_err(|_| format!("Checksum is not 32 bytes: {}", remote_info.checksum))?;
-
-    if let Some(local_checksum) = local_modpack_sha256 {
-      info!("   Found local modpack info! Checking for updates...");
-      if local_checksum == remote_checksum {
-        info!("   Local modpack is up to date!");
-        break;
-      }
-      info!("   Local modpack is outdated! Updating...");
-    } else {
-      // No previous modpack downloaded
-      info!("   Modpack not found. Downloading...");
-    }
-
-    // Download it
-    info!("   Downloading modpack...");
-    let remote_modpack = provider.reconstruct_encrypted_modpack(monitor.clone()).await?;
-    monitor.clear();
-
-    // Verify installation
-    info!("   Remote modpack downloaded! Verifying checksum...");
-    let manual_checksum: [u8; 32] = <Sha256 as Digest>::digest(&remote_modpack).into();
-    if manual_checksum != remote_checksum {
-      warn!("   Checksum mismatch. Download failed! (Remote: {}, Downloaded: {})", hex::encode(&remote_checksum), hex::encode(&manual_checksum));
-      continue;
-    }
-
-    let signature = hex::decode(remote_info.signature)?;
-    if let Err(err) = public_key.verify(Pkcs1v15Sign::new::<Sha256>(), &manual_checksum, &signature) {
-      warn!("   Failed to check signature. Download failed! ({})", err);
-    }
-
-    info!("   Modpack verified! Saving files...");
-    create_dir_all(&local_modpack_dir_path)?;
-    fs::File::create(&local_modpack_path)?.write_all(&remote_modpack)?;
-    fs::File::create(&local_modpack_sig_path)?.write_all(&signature)?;
-    should_install = true;
-    info!("Modpack download completed!");
-    break;
-  }
-  monitor.clear();
-  if !local_modpack_path.is_file() || !provider_success {
-    if !provider_success {
-      error!("All providers failed! Quitting...");
-    }
-    error!("Failed to download modpack!");
-    return Err("Failed to download modpack".into());
-  }
-
-  // TODO: Remove this, check if optionals change, or execute each time (because of replace = true config files ???)
-  debug!("Should the modpack be installed? {}", should_install); // TODO: remove, just to stop the warning
-  should_install = true;
-
-  if !should_install {
-    return Ok(());
-  }
-
-  let aes_decoder = Aes256CbcDec::new_from_slices(aes_keys.key(), aes_keys.iv())?;
-  monitor.set("Installing modpack", 0, 1);
-  if let Err(err) = try_install_modpack(mc_dir, aes_decoder, &local_modpack_path, chosen_optionals) {
-    error!("Failed to install modpack: {}", err);
-    fs::remove_file(&local_modpack_path)?;
-    fs::remove_file(&local_modpack_sig_path)?;
-    monitor.clear();
-    return Err(format!("Failed to install modpack: {err}").into());
-  }
-  monitor.set_progress(1);
-  Ok(())
-}
-
-fn try_install_modpack(
-  mc_dir: &PathBuf,
-  aes_decoder: Decryptor<Aes256>,
-  local_modpack_path: &PathBuf,
-  chosen_optionals: Vec<String>
-) -> Result<(), Box<dyn std::error::Error>> {
-  info!("Decoding modpack...");
-  let mut bytes = fs::read(&local_modpack_path)?;
-  let decoded = aes_decoder.decrypt_padded_mut::<Pkcs7>(&mut bytes).map_err(|err| format!("Failed to decrypt modpack: {err}"))?;
-  let archive = ZipArchive::new(Cursor::new(decoded)).map_err(|err| format!("Failed to open modpack archive: {err}"))?;
-
-  info!("Installing modpack...");
-  let mut modpack = ModpackArchiveReader::try_from(archive)?;
-  modpack.install(mc_dir, chosen_optionals)?;
-  info!("Modpack installed!");
-  Ok(())
 }
