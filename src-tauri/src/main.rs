@@ -7,18 +7,9 @@ mod logger;
 mod java;
 mod modpack_downloader;
 mod game_status;
+mod log_flusher;
 
-use std::{
-  collections::VecDeque,
-  env,
-  fs::{ self, create_dir_all, File },
-  io::BufRead,
-  ops::DerefMut,
-  path::{ Path, PathBuf },
-  sync::{ Arc, Mutex },
-  thread::{ self, sleep },
-  time::Duration,
-};
+use std::{ env, fs::{ self, create_dir_all, File }, io::BufRead, ops::DerefMut, path::{ Path, PathBuf }, sync::{ Arc, Mutex } };
 
 use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
 use forge_downloader::{
@@ -28,6 +19,7 @@ use forge_downloader::{
 };
 use game_status::{ GameStatus, GameStatusState };
 use log::{ info, debug, error };
+use log_flusher::flush_all_logs;
 use minecraft_launcher_core::{
   options::{ GameOptionsBuilder, LauncherOptions },
   profile_manager::auth::UserAuthentication,
@@ -49,13 +41,10 @@ use uuid::Uuid;
 
 use crate::{
   java::{ check_java_dir, download_java },
+  log_flusher::{ GAME_LOGS, LAUNCHER_LOGS },
   logger::{ setup_logger, LauncherAppender },
   modpack_downloader::{ ModpackDownloader, ModpackProvider },
 };
-
-static LAUNCHER_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
-static LAUNCHER_LOGS_CACHE: Lazy<Arc<Mutex<VecDeque<String>>>> = Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
-static GAME_LOGS: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(vec![])));
 
 static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(|| GameStatusState::new());
 
@@ -106,7 +95,7 @@ async fn start_game(
 {
   let window = Arc::new(window);
   let res = real_start_game(state, modpack_downloader, window.clone()).await.map_err(|e| e.into());
-  flush_launcher_logs(&window);
+  flush_all_logs(&window.app_handle());
   if let Err(err) = &res {
     error!("Failed to start game: {}", err);
   }
@@ -234,7 +223,7 @@ async fn real_start_game(
     if let Ok(length) = process.stdout().read_line(&mut buf) {
       if length > 0 {
         println!("{}", &buf.trim_end());
-        GAME_LOGS.lock().unwrap().push(buf.trim_end().to_string());
+        GAME_LOGS.log(buf.trim_end());
         buf.clear();
       }
     }
@@ -243,7 +232,7 @@ async fn real_start_game(
       if let Ok(length) = process.stderr().read_line(&mut buf) {
         if length > 0 {
           println!("{}", &buf.trim_end());
-          GAME_LOGS.lock().unwrap().push(buf.trim_end().to_string());
+          GAME_LOGS.log(buf.trim_end());
           buf.clear();
         }
       }
@@ -264,11 +253,6 @@ async fn real_start_game(
 #[tauri::command]
 fn get_game_status() -> GameStatus {
   GAME_STATUS_STATE.get()
-}
-
-#[tauri::command]
-fn get_launcher_logs_cache() -> Result<Vec<String>, TauriError> {
-  Ok(LAUNCHER_LOGS_CACHE.lock().unwrap().clone().into())
 }
 
 #[tauri::command]
@@ -306,21 +290,6 @@ async fn login_msa(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> R
   Ok(())
 }
 
-fn flush_launcher_logs(win: &Window) {
-  if let Ok(mut logs) = LAUNCHER_LOGS.try_lock() {
-    if !logs.is_empty() {
-      win.emit("launcher_log", logs.clone()).unwrap();
-      logs.clear();
-    }
-  }
-  if let Ok(mut logs) = GAME_LOGS.try_lock() {
-    if !logs.is_empty() {
-      win.emit("log", logs.clone()).unwrap();
-      logs.clear();
-    }
-  }
-}
-
 #[tokio::main]
 async fn main() {
   let logs_dir = GAME_DIR_PATH.join("logs/gelcorp-launcher");
@@ -328,13 +297,7 @@ async fn main() {
   info!("Starting tauri application...");
   LauncherAppender::add_callback(
     Box::new(move |msg| {
-      LAUNCHER_LOGS.lock()?.push(msg.trim_end().to_string());
-      if let Ok(mut cache) = LAUNCHER_LOGS_CACHE.lock() {
-        cache.push_back(msg.trim_end().to_string());
-        while cache.len() >= 1001 {
-          let _ = cache.pop_front();
-        }
-      }
+      LAUNCHER_LOGS.log(msg.trim_end());
       Ok(())
     })
   );
@@ -349,25 +312,14 @@ async fn main() {
     .setup(|app| {
       let win = app.get_window("main").unwrap();
       GAME_STATUS_STATE.set_window(win.clone());
-
-      let builder = thread::Builder::new();
-      builder
-        .name("launcher-log-watcher".to_owned())
-        .spawn(move || {
-          loop {
-            flush_launcher_logs(&win);
-            sleep(Duration::from_millis(5));
-          }
-        })
-        .expect("Failed to spawn log watcher thread");
       Ok(())
     })
+    .plugin(log_flusher::init())
     .manage(Mutex::new(launcher_config))
     .manage(futures::lock::Mutex::new(ModpackDownloader::new(GAME_DIR_PATH.to_path_buf(), providers)))
     .invoke_handler(
       tauri::generate_handler![
         start_game,
-        get_launcher_logs_cache,
         get_launcher_config,
         set_launcher_config,
         login_offline,

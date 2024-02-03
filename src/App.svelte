@@ -5,9 +5,6 @@
   import { launcherConfigStore } from "$/ipc/stores/launcher_config";
   import { gameLogsStore } from "./ipc/stores/loggers";
 
-  // Keep this active TODO: remove
-  gameLogsStore.subscribe(() => {});
-
   $: authenticated = $launcherConfigStore?.authentication !== undefined;
 </script>
 
