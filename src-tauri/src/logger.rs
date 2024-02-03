@@ -1,16 +1,13 @@
-use std::{ sync::Mutex, io::{ BufReader, BufRead }, fs::File, path::PathBuf };
+use std::{ fs::{ self, File }, io::Write, path::PathBuf, sync::Mutex };
 
 use chrono::Utc;
+use flate2::{ write::GzEncoder, Compression };
 use log::{ LevelFilter, Record };
 use log4rs::{
-  append::{
-    Append,
-    rolling_file::{ policy::compound::{ trigger::Trigger, CompoundPolicy, roll::fixed_window::FixedWindowRoller }, LogFile, RollingFileAppender },
-    console::ConsoleAppender,
-  },
-  encode::{ Encode, writer::simple::SimpleWriter, pattern::PatternEncoder },
-  filter::{ Filter, Response },
+  append::{ console::ConsoleAppender, file::FileAppender, Append },
   config::{ Appender, Root },
+  encode::{ pattern::PatternEncoder, writer::simple::SimpleWriter, Encode },
+  filter::{ Filter, Response },
   Config,
 };
 
@@ -76,29 +73,29 @@ impl Append for LauncherAppender {
   fn flush(&self) {}
 }
 
-#[derive(Debug)]
-struct StartupTrigger(Mutex<bool>);
-
-impl StartupTrigger {
-  fn new() -> Self {
-    Self(Mutex::new(false))
-  }
-}
-
-impl Trigger for StartupTrigger {
-  fn trigger(&self, file: &LogFile) -> anyhow::Result<bool> {
-    let mut ran = self.0.lock().unwrap();
-    if *ran {
-      Ok(false)
-    } else {
-      *ran = true;
-      let buf = BufReader::new(File::open(file.path())?);
-      Ok(buf.lines().count() > 1)
-    }
-  }
-}
-
 pub fn setup_logger(logs_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+  let date = Utc::now().format("%Y-%m-%d").to_string();
+  let latest_log = logs_dir.join("latest.log");
+  let gzipped_log = {
+    let mut i = 0;
+    loop {
+      let gzipped_log = logs_dir.join(format!("{date}-{i}.log.gz"));
+      if !gzipped_log.exists() {
+        break gzipped_log;
+      }
+      i += 1;
+    }
+  };
+
+  if latest_log.exists() {
+    if let Ok(bytes) = fs::read(&latest_log) {
+      let mut encoder = GzEncoder::new(File::create(gzipped_log)?, Compression::default());
+      encoder.write_all(&bytes)?;
+      encoder.finish()?;
+    }
+    fs::remove_file(&latest_log)?;
+  }
+
   let console_encoder = PatternEncoder::new("[{d(%H:%M:%S)}] [{M}/{h({l})}]: {m}{n}");
   let launcher_encoder = PatternEncoder::new("[{d(%H:%M:%S)} {l}]: {m}{n}");
   let file_encoder = PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}");
@@ -109,27 +106,14 @@ pub fn setup_logger(logs_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>
     .filter(Box::new(LogLevelFilter(LevelFilter::Info)))
     .build("launcher", Box::new(LauncherAppender::new(Box::new(launcher_encoder))));
 
-  let date = Utc::now().format("%Y-%m-%d").to_string();
-  let latest_log = logs_dir.join("latest.log");
-  let gzipped_log = {
-    let path = logs_dir.join(format!("{date}-{{}}.log.gz"));
-    path.to_str().unwrap().to_string()
-  };
-
-  let file = RollingFileAppender::builder()
-    .encoder(Box::new(file_encoder))
-    .build(
-      latest_log,
-      Box::new(CompoundPolicy::new(Box::new(StartupTrigger::new()), Box::new(FixedWindowRoller::builder().build(&gzipped_log, 10)?)))
-    )
-    .unwrap();
+  let file_appender = FileAppender::builder().encoder(Box::new(file_encoder)).build(latest_log)?;
 
   let root = Root::builder().appender("stdout").appender("launcher").appender("log_file").build(LevelFilter::Debug);
 
   let config = Config::builder()
     .appender(stdout_appender)
     .appender(launcher_appender)
-    .appender(Appender::builder().build("log_file", Box::new(file)))
+    .appender(Appender::builder().build("log_file", Box::new(file_appender)))
     .build(root)
     .expect("Failed to create log4rs config");
   log4rs::init_config(config)?;

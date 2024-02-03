@@ -45,6 +45,7 @@ rsa = { version = "0.9.6", features = ["sha2"] }
 cbc = "0.1.2"
 aes = "0.8.3"
 sysinfo = "0.30.5"
+flate2 = "1.0.28"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
