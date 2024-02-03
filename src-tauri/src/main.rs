@@ -10,7 +10,7 @@ mod game_status;
 mod log_flusher;
 mod forge;
 
-use std::{ env, io::BufRead, ops::DerefMut, path::{ Path, PathBuf }, sync::{ Arc, Mutex } };
+use std::{ env, io::BufRead, path::{ Path, PathBuf }, sync::Arc };
 
 use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
 use game_status::{ GameStatus, GameStatusState };
@@ -31,6 +31,7 @@ use sysinfo::System;
 use tauri::{ Window, Manager, Builder, State };
 
 use thiserror::Error;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
@@ -68,7 +69,7 @@ impl Serialize for TauriError {
 }
 
 #[tauri::command]
-async fn fetch_modpack_info(modpack_downloader: State<'_, futures::lock::Mutex<ModpackDownloader>>) -> Result<ModpackInfo, TauriError> {
+async fn fetch_modpack_info(modpack_downloader: State<'_, Mutex<ModpackDownloader>>) -> Result<ModpackInfo, TauriError> {
   let mut downloader = modpack_downloader.lock().await;
   let modpack_info = downloader.get_or_fetch_modpack_info().await?;
   Ok(modpack_info.clone())
@@ -82,7 +83,7 @@ fn get_system_memory() -> u64 {
 #[tauri::command]
 async fn start_game(
   state: State<'_, Mutex<LauncherConfig>>,
-  modpack_downloader: State<'_, futures::lock::Mutex<ModpackDownloader>>,
+  modpack_downloader: State<'_, Mutex<ModpackDownloader>>,
   window: Window
 ) -> Result<(), TauriError>
   where Window: Sync
@@ -106,13 +107,13 @@ pub struct DownloadProgress {
 
 async fn real_start_game(
   state: State<'_, Mutex<LauncherConfig>>,
-  modpack_downloader: State<'_, futures::lock::Mutex<ModpackDownloader>>,
+  modpack_downloader: State<'_, Mutex<ModpackDownloader>>,
   window: Arc<Window>
 ) -> Result<(), StdError>
   where Window: Sync
 {
   let authentication = {
-    let config = state.lock().unwrap();
+    let config = &*state.lock().await;
     let authentication = config.authentication.as_ref();
     if authentication.is_none() {
       config.broadcast_update(&window)?;
@@ -123,7 +124,7 @@ async fn real_start_game(
 
   let monitor = {
     let window = Arc::clone(&window);
-    let progress: Mutex<Option<DownloadProgress>> = Mutex::new(None);
+    let progress = std::sync::Mutex::new(None::<DownloadProgress>);
     Arc::new(
       ProgressReporter::new(move |update| {
         let progress = &mut *progress.lock().unwrap();
@@ -170,7 +171,7 @@ async fn real_start_game(
   let mut downloader = modpack_downloader.lock().await;
   {
     debug!("Checking modpack...");
-    let LauncherConfig { selected_options, .. } = state.lock().unwrap().clone();
+    let selected_options = state.lock().await.selected_options.clone();
     downloader.download_and_install(monitor.clone(), selected_options).await?;
   }
 
@@ -183,7 +184,7 @@ async fn real_start_game(
 
   let jvm_args = format!(
     "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
-    state.lock().unwrap().memory_max,
+    state.lock().await.memory_max,
     mc_dir.join("libraries").display(),
     forge_installer_path.display(),
     mc_dir.join(format!("versions/{id}/{id}.jar", id = &forge_version_name)).display()
@@ -250,21 +251,21 @@ fn get_game_status() -> GameStatus {
 }
 
 #[tauri::command]
-fn get_launcher_config(state: State<'_, Mutex<LauncherConfig>>) -> Result<LauncherConfig, TauriError> {
-  Ok(state.lock().unwrap().clone())
+async fn get_launcher_config(state: State<'_, Mutex<LauncherConfig>>) -> Result<LauncherConfig, TauriError> {
+  Ok(state.lock().await.clone())
 }
 
 #[tauri::command]
-fn set_launcher_config(state: State<'_, Mutex<LauncherConfig>>, config: LauncherConfig) -> Result<(), TauriError> {
-  let mut state = state.lock().unwrap();
-  *state.deref_mut() = config;
+async fn set_launcher_config(state: State<'_, Mutex<LauncherConfig>>, config: LauncherConfig) -> Result<(), TauriError> {
+  let mut state = state.lock().await;
+  *state = config;
   state.save_to_file()?;
   Ok(())
 }
 
 #[tauri::command]
-fn login_offline(state: State<'_, Mutex<LauncherConfig>>, window: Window, username: String) -> Result<(), TauriError> {
-  let mut state = state.lock().unwrap();
+async fn login_offline(state: State<'_, Mutex<LauncherConfig>>, window: Window, username: String) -> Result<(), TauriError> {
+  let mut state = state.lock().await;
   let uuid = Uuid::new_v3(&Uuid::NAMESPACE_DNS, format!("OfflinePlayer:{username}").as_bytes()).to_string();
   state.authentication = Some(Authentication::Offline { username, uuid });
   state.broadcast_update(&window)?;
@@ -277,7 +278,7 @@ async fn login_msa(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> R
   let ms_auth_token = msa_auth::get_msa_token(&window).await.map_err(|err| TauriError::Other(format!("Failed to get msa token: {}", err)))?;
   let auth = MsaMojangAuth::from(ms_auth_token).await.map_err(|err| TauriError::Other(format!("Failed to login: {}", err)))?;
 
-  let mut state = state.lock().unwrap();
+  let mut state = state.lock().await;
   state.authentication = Some(Authentication::Msa(auth));
   state.broadcast_update(&window)?;
   state.save_to_file()?;
@@ -310,7 +311,7 @@ async fn main() {
     })
     .plugin(log_flusher::init())
     .manage(Mutex::new(launcher_config))
-    .manage(futures::lock::Mutex::new(ModpackDownloader::new(GAME_DIR_PATH.to_path_buf(), providers)))
+    .manage(Mutex::new(ModpackDownloader::new(GAME_DIR_PATH.to_path_buf(), providers)))
     .invoke_handler(
       tauri::generate_handler![
         start_game,
