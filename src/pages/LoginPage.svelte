@@ -38,7 +38,7 @@
 <main>
   <form on:submit|preventDefault={loginOffline} class="container">
     <section class="img-container">
-      <img src="gelcorp-title.png" alt="" />
+      <img src="gelcorp-title.webp" alt="Logo de Gelcorp" />
       {#if login_error}
         <label for="username"><i>({login_error})</i></label>
       {/if}

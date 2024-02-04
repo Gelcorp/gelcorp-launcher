@@ -33,7 +33,7 @@
 
     <div class="lower-parts">
       <div class="left">
-        <img src="gelcorp-title.png" alt="Logo de Gelcorp" />
+        <img src="gelcorp-title.webp" alt="Logo de Gelcorp" />
       </div>
       <div class="right">
         <button class="main-btn" on:click={handleClick} disabled={isRunning}>

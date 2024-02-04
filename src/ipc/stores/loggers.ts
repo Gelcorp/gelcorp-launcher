@@ -12,7 +12,6 @@ function createLogsStore(id: string) {
   let { subscribe, set, update } = writable<string[]>([], (set) => {
     // Get logs from cache
     invoke("plugin:log-flusher|get_logs", { id }).then((logs) => {
-      console.log(logs);
       set(logs as string[]);
     });
 
