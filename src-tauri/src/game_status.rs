@@ -10,28 +10,25 @@ pub enum GameStatus {
   Playing,
 }
 
-pub struct GameStatusState {
-  pub status: Mutex<GameStatus>,
-  pub window: Mutex<Option<Window>>,
-}
+pub struct GameStatusState(Mutex<GameStatus>, Mutex<Option<Window>>);
 
 impl GameStatusState {
   pub fn new() -> Self {
-    Self { status: Mutex::new(GameStatus::Idle), window: Mutex::new(None) }
+    Self(Mutex::new(GameStatus::Idle), Mutex::new(None))
   }
 
   pub fn set_window(&self, window: Window) {
-    *self.window.lock().unwrap() = Some(window);
+    self.1.lock().unwrap().replace(window);
   }
 
   pub fn set(&self, status: GameStatus) {
-    *self.status.lock().unwrap() = status.clone();
-    if let Some(window) = &*self.window.lock().unwrap() {
+    *self.0.lock().unwrap() = status.clone();
+    if let Some(window) = &*self.1.lock().unwrap() {
       let _ = window.emit("game_status", status);
     }
   }
 
   pub fn get(&self) -> GameStatus {
-    self.status.lock().unwrap().clone()
+    self.0.lock().unwrap().clone()
   }
 }

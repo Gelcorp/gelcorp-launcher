@@ -3,7 +3,6 @@
   import LoginPage from "$/pages/LoginPage.svelte";
 
   import { launcherConfigStore } from "$/ipc/stores/launcher_config";
-  import { gameLogsStore } from "./ipc/stores/loggers";
 
   $: authenticated = $launcherConfigStore?.authentication !== undefined;
 </script>

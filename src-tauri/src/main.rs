@@ -267,7 +267,7 @@ async fn set_launcher_config(state: State<'_, Mutex<LauncherConfig>>, config: La
 async fn login_offline(state: State<'_, Mutex<LauncherConfig>>, window: Window, username: String) -> Result<(), TauriError> {
   let mut state = state.lock().await;
   let uuid = Uuid::new_v3(&Uuid::NAMESPACE_DNS, format!("OfflinePlayer:{username}").as_bytes()).to_string();
-  state.authentication = Some(Authentication::Offline { username, uuid });
+  state.authentication.replace(Authentication::Offline { username, uuid });
   state.broadcast_update(&window)?;
   state.save_to_file()?;
   Ok(())
@@ -279,7 +279,7 @@ async fn login_msa(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> R
   let auth = MsaMojangAuth::from(ms_auth_token).await.map_err(|err| TauriError::Other(format!("Failed to login: {}", err)))?;
 
   let mut state = state.lock().await;
-  state.authentication = Some(Authentication::Msa(auth));
+  state.authentication.replace(Authentication::Msa(auth));
   state.broadcast_update(&window)?;
   state.save_to_file()?;
   Ok(())
@@ -300,13 +300,13 @@ async fn main() {
   let launcher_config = LauncherConfig::load_from_file().await;
   let providers: Vec<ModpackProvider> = launcher_config.providers
     .iter()
-    .map(|p| ModpackProvider::new(p))
+    .map(|s| ModpackProvider::new(s))
     .collect();
 
   Builder::default()
     .setup(|app| {
       let win = app.get_window("main").unwrap();
-      GAME_STATUS_STATE.set_window(win.clone());
+      GAME_STATUS_STATE.set_window(win);
       Ok(())
     })
     .plugin(log_flusher::init())

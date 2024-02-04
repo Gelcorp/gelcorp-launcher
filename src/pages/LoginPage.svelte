@@ -1,6 +1,6 @@
 <script lang="ts">
-  import ProgressBar from "$/components/ProgressBar.svelte";
   import { loginCracked, loginMicrosoft } from "$/ipc/auth";
+  import ProgressBar from "$/components/ProgressBar.svelte";
 
   let logging_in = false;
   let login_error: string | undefined;
