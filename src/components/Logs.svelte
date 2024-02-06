@@ -26,7 +26,7 @@
   onMount(scrollConsole);
 </script>
 
-<div
+<section
   class="logs"
   bind:this={consoleElement}
   contenteditable="true"
@@ -40,11 +40,11 @@
   {#each logs as log}
     <p>{log}</p>
   {/each}
-</div>
+</section>
 
 <style>
   .logs {
-    background-color: #00000010;
+    background-color: #fff;
     /* padding: 3px; */
     overflow: auto;
 
@@ -62,7 +62,7 @@
     box-sizing: border-box;
   }
 
-  .logs * {
+  .logs p {
     margin: 0;
     padding: 0;
     /* text-wrap: wrap; */

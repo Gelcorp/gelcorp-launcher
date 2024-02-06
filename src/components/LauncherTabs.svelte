@@ -36,7 +36,7 @@
 
 <style>
   .tabs {
-    background-color: rgb(158, 158, 158);
+    background-color: #f0f0f0;
     display: grid;
     grid-template-rows: min-content 1fr;
     padding: 2px;
@@ -48,11 +48,11 @@
 
   .tabs nav {
     display: flex;
-    background-color: rgb(158, 158, 158);
     align-items: flex-end;
   }
 
   .tabs nav button {
+    font-size: 12.75px;
     background-color: #e0e0e0;
     padding: 1px 6px;
     border: 1px solid gray;

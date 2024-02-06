@@ -4,6 +4,7 @@
   import { gameLogsStore, launcherLogsStore } from "$/ipc/stores/loggers";
   import { progressStore } from "$/ipc/stores/progress";
   import { GameStatus, gameStatusStore } from "$/ipc/stores/game_status";
+  import { launcherConfigStore } from "$/ipc/stores/launcher_config";
 
   let selectedTab = 0;
 
@@ -18,128 +19,125 @@
       launcherLogsStore.log("Failed to launch the game: " + e);
     });
   }
+
+  let buttonLabel: string;
+  $: {
+    if ($gameStatusStore === GameStatus.Idle) {
+      buttonLabel = "Jugar";
+    } else if ($gameStatusStore === GameStatus.Downloading) {
+      buttonLabel = "Descargando";
+    } else {
+      buttonLabel = "Jugando";
+    }
+  }
+
+  let { username, uuid } = $launcherConfigStore.authentication!;
+  let { logout } = launcherConfigStore;
 </script>
 
-<main class="container">
-  <div class="upper">
-    <LauncherTabs bind:selectedTab />
-  </div>
-  <section class="lower">
+<main>
+  <LauncherTabs bind:selectedTab />
+  <footer>
     {#if $progressStore}
       <div class="progressbar-container">
         <ProgressBar info={$progressStore?.status} progress={$progressStore?.current / $progressStore?.total} --height="14px" --bar-color="#0078d7" />
       </div>
     {/if}
 
-    <div class="lower-parts">
-      <div class="left">
-        <img src="gelcorp-title.webp" alt="Logo de Gelcorp" />
-      </div>
-      <div class="right">
-        <button class="main-btn" on:click={handleClick} disabled={isRunning}>
-          {$gameStatusStore === GameStatus.Idle ? "Jugar" : $gameStatusStore === GameStatus.Downloading ? "Descargando" : "Jugando"}
-        </button>
-      </div>
+    <div class="lower">
+      <img src="gelcorp-title.webp" alt="Logo de Gelcorp" />
+      <button class="start-btn" on:click={handleClick} disabled={isRunning}>
+        {buttonLabel}
+      </button>
+      <section>
+        <p>Bienvenido, <b><img src="https://crafatar.com/avatars/{uuid}?overlay=true?size=64" alt="Avatar del jugador" /> {username}</b></p>
+        <button on:click={logout}>Cambiar Usuario</button>
+      </section>
     </div>
-  </section>
+  </footer>
 </main>
 
 <style>
-  .container {
-    background-repeat: no-repeat;
-    background-size: cover;
-    image-rendering: optimizeQuality;
-
+  main {
     display: grid;
     grid-template-rows: 1fr min-content;
-    justify-content: stretch;
-    justify-items: stretch;
-    max-height: 100%;
-    overflow: hidden;
+    max-height: 100vh;
   }
 
-  .upper {
+  footer {
     display: grid;
-    justify-content: stretch;
-    align-content: stretch;
-    overflow: hidden;
+    grid-template-rows: min-content 1fr;
+    height: 100%;
   }
 
-  .main-btn {
+  footer .lower {
+    box-sizing: border-box;
+
+    background-image: url("/bedrock.png");
+    background-size: 75px;
+    image-rendering: pixelated;
+    box-shadow: inset 0 -10px 80px -5px #000;
+
+    height: 75px;
+    padding: 5px 15px;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    align-items: center;
+  }
+
+  footer .lower img {
+    width: 225px;
+  }
+
+  footer .lower section {
+    justify-self: right;
+    text-align: center;
+    color: #fff;
+  }
+
+  footer .lower section p {
+    margin: 0;
+    font-size: 14.5px;
+  }
+
+  footer .lower section b {
+    font-weight: 600;
+  }
+
+  footer .lower section img {
+    width: 14.5px;
+    height: auto;
+  }
+
+  .start-btn {
+    justify-self: center;
+
     background-color: #2a632a;
     border: 2px solid #1c421c;
-    font-size: 2.5rem;
-    text-align: center;
-    width: 177.6px;
-    height: 66.4px;
+
     font-family: "Minecraft Ten";
+    font-size: 2.45rem;
+    text-align: center;
     text-transform: uppercase;
-    font-weight: 800;
-    color: white;
+    color: #fff;
+    font-weight: bold;
+
+    width: 220px;
+    height: 60px;
   }
 
-  .main-btn:disabled {
+  .start-btn:disabled {
     background-color: #5c5e5c;
     border: 2px solid #3a3b3a;
-
-    /* For states */
-    font-size: 1.45rem;
+    font-size: 28px;
   }
 
-  .main-btn:hover:not(:disabled) {
+  .start-btn:hover:not(:disabled) {
     background-color: #225022;
   }
 
-  .main-btn:active:not(:disabled) {
+  .start-btn:active:not(:disabled) {
     background-color: #163316;
-  }
-
-  .lower {
-    grid-template-rows: min-content 1fr;
-    align-items: center;
-    /* border-top: 2px solid #000; */
-  }
-
-  .lower-parts {
-    background-image: url("/bedrock.png");
-    background-size: 84px;
-    image-rendering: pixelated;
-
-    box-shadow: inset 0 -10px 80px -5px black;
-
-    text-align: center;
-
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: center;
-  }
-
-  .progressbar-container {
-    grid-column: -1 / -3;
-  }
-
-  .lower .left {
-    display: flex;
-    justify-content: start;
-    padding-left: 2em;
-  }
-
-  .lower .left img {
-    box-sizing: border-box;
-    width: 80%;
-    max-width: 260px;
-    padding: 15px 5px;
-  }
-
-  .lower .right {
-    display: flex;
-    justify-content: end;
-    gap: 10px;
-    padding-right: 2em;
-  }
-
-  .lower .right .user-info * {
-    margin: 0;
-    text-wrap: nowrap;
   }
 </style>
