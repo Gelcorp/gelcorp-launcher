@@ -1,5 +1,6 @@
 <script lang="ts">
   import { loginCracked, loginMicrosoft } from "$/ipc/auth";
+  import AlertBoxLayout from "$/components/AlertBoxLayout.svelte";
   import ProgressBar from "$/components/ProgressBar.svelte";
 
   let logging_in = false;
@@ -35,8 +36,8 @@
   }
 </script>
 
-<main>
-  <form on:submit|preventDefault={loginOffline} class="container">
+<AlertBoxLayout>
+  <form on:submit|preventDefault={loginOffline}>
     <section class="img-container">
       <img src="gelcorp-title.webp" alt="Logo de Gelcorp" />
       {#if login_error}
@@ -58,40 +59,23 @@
       </div>
     {/if}
   </form>
-</main>
+</AlertBoxLayout>
 
 <style>
-  main {
-    background-image: url("/bedrock.png");
-    background-color: #0000008a;
-    background-blend-mode: multiply;
-    background-size: 64px;
-    image-rendering: pixelated;
-    box-shadow: inset 0 -10px 80px -5px black;
-
-    display: grid;
-    place-content: center;
-  }
-
   .img-container {
     text-align: center;
     height: 100%;
     color: #8f8f8f;
   }
 
-  .container {
-    color: white;
-    background-color: #0f0f0f;
-    padding: 1em;
-
+  form {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    width: 42vw;
-    max-width: 340px;
+    text-align: left;
   }
 
-  .container label {
+  form label {
     display: block;
     font-weight: 700;
     font-size: 0.85rem;
@@ -101,7 +85,7 @@
     padding: 0;
   }
 
-  .container input {
+  form input {
     margin: 0;
     background-color: white;
     color: black;
@@ -109,16 +93,18 @@
     outline: none;
   }
 
-  .container img {
+  form img {
     height: 2.8rem;
     margin: 0 2.5em;
     margin-bottom: 1em;
   }
 
-  .container button {
+  form button {
     margin-top: 5px;
     background-color: #e1e1e1;
     color: black;
+    border: 1px solid gray;
+
     box-sizing: border-box;
   }
 
