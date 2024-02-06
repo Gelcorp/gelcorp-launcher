@@ -28,7 +28,7 @@ use once_cell::sync::Lazy;
 use regex::{ Captures, Regex };
 use serde::Serialize;
 use sysinfo::System;
-use tauri::{ Window, Manager, Builder, State };
+use tauri::{ utils::config::{ PackageConfig, UpdaterEndpoint }, Builder, Manager, State, Window };
 
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -303,9 +303,28 @@ async fn main() {
     .map(|s| ModpackProvider::new(s))
     .collect();
 
+  let mut context = tauri::generate_context!();
+  let update_endpoints = {
+    let endpoints = env!("UPDATE_ENDPOINTS").split(" ");
+    endpoints.map(|s| UpdaterEndpoint(s.parse().expect("Failed to parse update endpoint"))).collect::<Vec<_>>()
+  };
+  context.config_mut().tauri.updater.endpoints.replace(update_endpoints);
+
+  let title = {
+    let PackageConfig { product_name, version } = &context.config().package;
+    if let (Some(product_name), Some(version)) = (product_name, version) {
+      Some(format!("{product_name} {version}"))
+    } else {
+      None
+    }
+  };
+
   Builder::default()
-    .setup(|app| {
+    .setup(move |app| {
       let win = app.get_window("main").unwrap();
+      if let Some(title) = title {
+        let _ = win.set_title(&title);
+      }
       GAME_STATUS_STATE.set_window(win);
       Ok(())
     })
@@ -324,7 +343,7 @@ async fn main() {
         get_game_status
       ]
     )
-    .run(tauri::generate_context!())
+    .run(context)
     .expect("error while running tauri application");
 }
 
