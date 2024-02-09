@@ -281,11 +281,10 @@ impl ModpackDownloader {
     let mut modpack = ModpackArchiveReader::try_from(archive)?;
     let chosen_optionals = {
       let manifest = modpack.get_manifest()?;
-      let mut optionals = manifest.optionals.iter();
-      chosen_optionals
-        .iter()
-        .filter(|&name| optionals.any(|o| &o.id == name))
-        .cloned()
+      manifest.optionals
+        .into_iter()
+        .map(|opt| opt.id)
+        .filter(|id| chosen_optionals.contains(id))
         .collect()
     };
     modpack.install(&self.mc_dir, chosen_optionals)?;
