@@ -6,7 +6,7 @@ use aes::{ cipher::{ block_padding::Pkcs7, BlockDecryptMut, KeyIvInit }, Aes256 
 use cbc::Decryptor;
 use chrono::Utc;
 use futures::StreamExt;
-use gelcorp_modpack::{ reader::zip::ModpackArchiveReader, types::ModOptional };
+use gelcorp_modpack::{ reader::{ zip::ModpackArchiveReader, ModpackReader }, types::ModOptional };
 use log::{ debug, error, info, warn };
 use minecraft_launcher_core::progress_reporter::ProgressReporter;
 use reqwest::{ Url, Client, ClientBuilder };
@@ -279,6 +279,15 @@ impl ModpackDownloader {
 
     info!("Installing modpack...");
     let mut modpack = ModpackArchiveReader::try_from(archive)?;
+    let chosen_optionals = {
+      let manifest = modpack.get_manifest()?;
+      let mut optionals = manifest.optionals.iter();
+      chosen_optionals
+        .iter()
+        .filter(|&name| optionals.any(|o| &o.id == name))
+        .cloned()
+        .collect()
+    };
     modpack.install(&self.mc_dir, chosen_optionals)?;
     info!("Modpack installed!");
     Ok(())
