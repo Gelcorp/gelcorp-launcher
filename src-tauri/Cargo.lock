@@ -2116,8 +2116,8 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minecraft-launcher-core"
-version = "0.1.0"
-source = "git+https://github.com/Gelcorp/minecraft-launcher-core.git#4b27990d26e9b08b6e2a73e488808966a85ca148"
+version = "1.0.0"
+source = "git+https://github.com/Gelcorp/minecraft-launcher-core.git#963369d60e69644660c6b38addbb45e59430fa5e"
 dependencies = [
  "anyhow",
  "async-recursion",
@@ -2129,7 +2129,6 @@ dependencies = [
  "libflate",
  "log",
  "md5",
- "once_cell",
  "os_info",
  "regex",
  "reqwest",
