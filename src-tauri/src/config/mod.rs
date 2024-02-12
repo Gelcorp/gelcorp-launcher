@@ -81,7 +81,7 @@ impl LauncherConfig {
   }
 
   fn default_memory_max() -> u16 {
-    1024
+    1536
   }
 
   fn default_providers() -> Vec<String> {
