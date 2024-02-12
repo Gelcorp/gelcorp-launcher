@@ -7,7 +7,7 @@
 
   $: gameRunning = $gameStatusStore !== GameStatus.Idle;
 
-  $: optionals = $modpackInfoStore?.optionals ?? [];
+  $: optionals = $modpackInfoStore?.optionals;
   let incompatibilities: { [key: string]: Optional[] } = {};
   $: selectedOptions = $launcherConfigStore.selected_options ?? [];
 
@@ -18,9 +18,9 @@
     }
 
     incompatibilities = {};
-    for (const optional of optionals) {
+    for (const optional of optionals ?? []) {
       if (optional.incompatible_with === undefined) continue;
-      let mappedIncompatibilities = optionals.filter(({ id }) => optional.incompatible_with?.includes(id));
+      let mappedIncompatibilities = (optionals ?? []).filter(({ id }) => optional.incompatible_with?.includes(id));
       mappedIncompatibilities.forEach((inc) => {
         addIncompatibility(optional.id, inc);
         addIncompatibility(inc.id, optional);
@@ -49,11 +49,6 @@
       .map((inc) => inc.name);
   };
 
-  let memoryElement: HTMLInputElement;
-  launcherConfigStore.subscribe((config) => {
-    if (memoryElement) memoryElement.value = String(config.memory_max);
-  });
-
   // Rounded gb
   $: totalMem = Math.ceil($totalMemoryStore / 1024 / 1024 / 1024) * 1024;
 </script>
@@ -61,45 +56,51 @@
 <main>
   <h2>Configuración del juego:</h2>
   <section class="category">
-    {#if totalMem > 0}
-      <label for="memory">
-        Memoria RAM:
+    <label for="memory">
+      Memoria RAM:
+      {#if totalMem > 0}
         <RamSlider bind:value={$launcherConfigStore.memory_max} min={512} max={totalMem} disabled={gameRunning} />
-      </label>
-    {/if}
+      {:else}
+        <p>Cargando...</p>
+      {/if}
+    </label>
   </section>
   <h2>Mods Opcionales:</h2>
   <section class="opt-container">
-    {#each optionals as { description, icon, id, name }}
-      {@const selected = selectedOptions.includes(id)}
-      {@const allIncompatibilities = getIncompatibilities(id)}
-      {@const enabledIncompatibilities = getEnabledIncompatibilities(id)}
+    {#if optionals !== undefined}
+      {#each optionals as { description, icon, id, name }}
+        {@const selected = selectedOptions.includes(id)}
+        {@const allIncompatibilities = getIncompatibilities(id)}
+        {@const enabledIncompatibilities = getEnabledIncompatibilities(id)}
 
-      <article class="opt-card">
-        <img src={icon} alt="" />
-        <section>
-          <div class="top">
-            <h3>{name}</h3>
-            <p>{description}</p>
-            {#if allIncompatibilities.length > 0}
-              <p>
-                No es compatible con: <b>{allIncompatibilities.map((inc) => inc.name).join(", ")}</b>
-              </p>
-            {/if}
-          </div>
-          <div class="bottom">
-            <button
-              class:red={selected}
-              disabled={enabledIncompatibilities.length > 0 || gameRunning}
-              on:click={() => enabledIncompatibilities.length == 0 && toggleSelect(id)}>{selected ? "Desactivar" : "Activar"}</button
-            >
-            {#if enabledIncompatibilities.length > 0}
-              <span class="red">Incompatible con <b>{enabledIncompatibilities.join(", ")}</b></span>
-            {/if}
-          </div>
-        </section>
-      </article>
-    {/each}
+        <article class="opt-card">
+          <img src={icon} alt="" />
+          <section>
+            <div class="top">
+              <h3>{name}</h3>
+              <p>{description}</p>
+              {#if allIncompatibilities.length > 0}
+                <p>
+                  No es compatible con: <b>{allIncompatibilities.map((inc) => inc.name).join(", ")}</b>
+                </p>
+              {/if}
+            </div>
+            <div class="bottom">
+              <button
+                class:red={selected}
+                disabled={enabledIncompatibilities.length > 0 || gameRunning}
+                on:click={() => enabledIncompatibilities.length == 0 && toggleSelect(id)}>{selected ? "Desactivar" : "Activar"}</button
+              >
+              {#if enabledIncompatibilities.length > 0}
+                <span class="red">Incompatible con <b>{enabledIncompatibilities.join(", ")}</b></span>
+              {/if}
+            </div>
+          </section>
+        </article>
+      {/each}
+    {:else}
+      <p>Cargando...</p>
+    {/if}
   </section>
 </main>
 
