@@ -9,8 +9,16 @@
 
   $: authenticated = $launcherConfigStore?.authentication !== undefined;
 
-  let update = checkUpdate();
   let showUpdateScreen = true;
+  let update = new Promise(async (resolve) => {
+    try {
+      let update = await checkUpdate();
+      resolve(update);
+    } catch (err) {
+      console.error(`Error checking for updates: ${err}`);
+      resolve({ shouldUpdate: false });
+    }
+  });
 </script>
 
 {#await update}
