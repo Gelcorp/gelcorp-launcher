@@ -1,6 +1,6 @@
 [package]
 name = "gelcorp-launcher"
-version = "1.0.3"
+version = "1.0.4"
 description = "Gelcorp Launcher"
 authors = ["MonkeyKiller"]
 license = ""
