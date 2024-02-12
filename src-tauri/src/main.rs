@@ -28,7 +28,7 @@ use once_cell::sync::Lazy;
 use regex::{ Captures, Regex };
 use serde::Serialize;
 use sysinfo::System;
-use tauri::{ utils::config::{ PackageConfig, UpdaterEndpoint }, Builder, Manager, State, Window };
+use tauri::{ utils::config::UpdaterEndpoint, Builder, Manager, State, Window };
 
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -44,7 +44,7 @@ use crate::{
 static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(|| GameStatusState::new());
 
 const LAUNCHER_NAME: &str = env!("LAUNCHER_NAME");
-const LAUNCHER_VERSION: &str = env!("LAUNCHER_VERSION");
+const LAUNCHER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path(&env!("GAME_DIR_PATH")));
 
 type StdError = Box<dyn std::error::Error>;
@@ -310,21 +310,12 @@ async fn main() {
   };
   context.config_mut().tauri.updater.endpoints.replace(update_endpoints);
 
-  let title = {
-    let PackageConfig { product_name, version } = &context.config().package;
-    if let (Some(product_name), Some(version)) = (product_name, version) {
-      Some(format!("{product_name} {version}"))
-    } else {
-      None
-    }
-  };
+  let title = format!("{} {}", LAUNCHER_NAME, LAUNCHER_VERSION);
 
   Builder::default()
     .setup(move |app| {
       let win = app.get_window("main").unwrap();
-      if let Some(title) = title {
-        let _ = win.set_title(&title);
-      }
+      let _ = win.set_title(&title);
       GAME_STATUS_STATE.set_window(win);
       Ok(())
     })
