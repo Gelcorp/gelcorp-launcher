@@ -6,11 +6,9 @@ use std::{
   io::{ BufWriter, Write, self },
   process::{ Command, Stdio },
   os::windows::process::CommandExt,
-  sync::Arc,
 };
 
-use futures::StreamExt;
-use minecraft_launcher_core::progress_reporter::ProgressReporter;
+use minecraft_launcher_core::version_manager::downloader::progress::ProgressReporter;
 use reqwest::ClientBuilder;
 use zip::ZipArchive;
 
@@ -28,7 +26,7 @@ pub fn check_java_dir(java_dir: &PathBuf) -> bool {
     .is_ok_and(|c| c.success())
 }
 
-pub async fn download_java(reporter: Arc<ProgressReporter>, java_dir: &PathBuf, java_version: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn download_java(reporter: ProgressReporter, java_dir: &PathBuf, java_version: &str) -> Result<(), Box<dyn std::error::Error>> {
   let client = ClientBuilder::new().connect_timeout(Duration::from_secs(30)).build()?;
   let os = match OS {
     "macos" => "mac",
@@ -40,7 +38,7 @@ pub async fn download_java(reporter: Arc<ProgressReporter>, java_dir: &PathBuf, 
     arch => arch,
   };
   let url = format!("https://api.adoptium.net/v3/binary/latest/{java_version}/ga/{os}/{arch}/jre/hotspot/normal/eclipse");
-  let response = client.get(url).send().await?.error_for_status()?;
+  let mut response = client.get(url).send().await?.error_for_status()?;
 
   let temp_file_path = java_dir.join("runtime.tmp");
   create_dir_all(java_dir)?;
@@ -50,19 +48,18 @@ pub async fn download_java(reporter: Arc<ProgressReporter>, java_dir: &PathBuf, 
     let mut file = File::create(&temp_file_path)?;
     let status = format!("Downloading java {}", java_version);
     let mut current = 0;
-    let total = response.content_length().unwrap() as u32;
+    let total = response.content_length().map(|n| n as usize);
 
-    reporter.set(&status, current, total);
+    reporter.setup(&status, total);
 
     let mut writer = BufWriter::new(&mut file);
-    let mut stream = response.bytes_stream();
-    while let Some(Ok(chunk)) = stream.next().await {
-      current += chunk.len() as u32;
+    while let Some(chunk) = response.chunk().await? {
+      current += chunk.len();
       writer.write_all(&chunk)?;
-      reporter.set_progress(current);
+      reporter.progress(current);
     }
 
-    reporter.clear();
+    reporter.done();
   }
   // Extract file
   {
@@ -72,11 +69,13 @@ pub async fn download_java(reporter: Arc<ProgressReporter>, java_dir: &PathBuf, 
     let mut progress = 0;
     let total = archive.len();
 
+    reporter.setup("Extracting java", Some(total));
     for i in 0..total {
       let mut zip_archive = archive.by_index(i)?;
       if let Some((_, file_name)) = zip_archive.name().split_once("/") {
         progress += 1;
-        reporter.set(&format!("Extracting {}", file_name), progress, total as u32);
+        reporter.status(&format!("Extracting {}", file_name));
+        reporter.progress(progress);
         let target_path = java_dir.join(file_name);
         if file_name.is_empty() {
           continue;
@@ -95,7 +94,7 @@ pub async fn download_java(reporter: Arc<ProgressReporter>, java_dir: &PathBuf, 
       }
     }
   }
-  reporter.clear();
+  reporter.done();
   let _ = fs::remove_file(temp_file_path);
 
   Ok(())
@@ -104,6 +103,8 @@ pub async fn download_java(reporter: Arc<ProgressReporter>, java_dir: &PathBuf, 
 #[cfg(test)]
 mod tests {
   use std::{ env::temp_dir, sync::Arc };
+  use minecraft_launcher_core::version_manager::downloader::progress::EmptyReporter;
+
   use super::*;
 
   #[tokio::test]
@@ -113,7 +114,7 @@ mod tests {
       println!("Java already exists");
       return Ok(());
     }
-    download_java(Arc::new(ProgressReporter::default()), &java_dir, "17").await?;
+    download_java(Arc::new(EmptyReporter), &java_dir, "17").await?;
     assert!(check_java_dir(&java_dir));
     Ok(())
   }

@@ -1,6 +1,6 @@
 use chrono::Utc;
 use log::info;
-use minecraft_launcher_core::profile_manager::auth::{ CommonUserAuthentication, OfflineUserAuthentication, UserAuthentication };
+use minecraft_launcher_core::bootstrap::auth::UserAuthentication;
 use minecraft_msa_auth::MinecraftAuthorizationFlow;
 use reqwest::Client;
 use serde::{ Deserialize, Serialize };
@@ -18,15 +18,18 @@ pub(crate) enum Authentication {
   },
 }
 
-impl TryInto<Box<dyn UserAuthentication + Send + Sync>> for Authentication {
+impl TryInto<UserAuthentication> for Authentication {
   type Error = StdError;
-  fn try_into(self) -> Result<Box<dyn UserAuthentication + Send + Sync>, Self::Error> {
+  fn try_into(self) -> Result<UserAuthentication, Self::Error> {
     match self {
       Authentication::Msa(msa) => {
-        let auth: CommonUserAuthentication = msa.into();
-        Ok(Box::new(auth))
+        Ok(UserAuthentication {
+          username: msa.username,
+          uuid: Uuid::parse_str(&msa.uuid)?,
+          access_token: Some(msa.moj_token),
+        })
       }
-      Authentication::Offline { username, uuid } => Ok(Box::new(OfflineUserAuthentication { username, uuid: Uuid::parse_str(&uuid)? })),
+      Authentication::Offline { username, .. } => Ok(UserAuthentication::offline(&username)),
     }
   }
 }
@@ -90,7 +93,7 @@ impl MsaMojangAuth {
       .exchange_microsoft_token(&self.msa_access_token).await
       .map_err(|err| format!("Failed to exchange msa token: {}", err))?;
 
-    self.username = mc_token.username().clone();
+    self.username.clone_from(mc_token.username());
     self.moj_token = mc_token.access_token().clone().into_inner();
     self.moj_expiration_date = Utc::now().timestamp_millis() + (mc_token.expires_in() as i64) * 1000;
     Ok(())
@@ -122,13 +125,12 @@ impl MsaMojangAuth {
   }
 }
 
-impl Into<CommonUserAuthentication> for MsaMojangAuth {
-  fn into(self) -> CommonUserAuthentication {
-    CommonUserAuthentication {
-      access_token: self.msa_access_token,
-      auth_playername: self.username,
-      auth_uuid: Uuid::parse_str(&self.uuid).unwrap(),
-      user_type: "msa".to_string(),
+impl From<MsaMojangAuth> for UserAuthentication {
+  fn from(moj_auth: MsaMojangAuth) -> Self {
+    UserAuthentication {
+      username: moj_auth.username,
+      uuid: Uuid::parse_str(&moj_auth.uuid).unwrap(),
+      access_token: Some(moj_auth.moj_token),
     }
   }
 }

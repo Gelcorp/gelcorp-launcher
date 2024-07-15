@@ -1,21 +1,22 @@
-use std::sync::{ Arc, Mutex };
+use std::{ borrow::Cow, collections::HashMap, sync::{ Arc, Mutex } };
 
 use chrono::Utc;
+use log::debug;
 use oauth2::{
   basic::{ BasicClient, BasicTokenType },
-  ClientId,
-  AuthUrl,
-  TokenUrl,
-  AuthType,
-  RedirectUrl,
-  PkceCodeChallenge,
-  CsrfToken,
-  Scope,
-  AuthorizationCode,
   reqwest::async_http_client,
-  TokenResponse,
-  StandardTokenResponse,
+  AuthType,
+  AuthUrl,
+  AuthorizationCode,
+  ClientId,
+  CsrfToken,
   EmptyExtraTokenFields,
+  PkceCodeChallenge,
+  RedirectUrl,
+  Scope,
+  StandardTokenResponse,
+  TokenResponse,
+  TokenUrl,
 };
 use reqwest::Url;
 use serde::{ Deserialize, Serialize };
@@ -45,14 +46,17 @@ pub async fn get_msa_token(owner_window: &Window) -> Result<MSAuthToken, Box<dyn
     .add_scope(Scope::new("XboxLive.signin offline_access".to_string()))
     .set_pkce_challenge(pkce_code_challenge)
     .add_extra_param("prompt", "select_account")
+    .add_extra_param("cobrandid", "8058f65d-ce06-4c30-9559-473c9275a65d") // Adds the Minecraft branding to the login page
     .url();
+
+  debug!("Auth link: {}", auth_link);
 
   // Open window and wait for redirect
   let window = WindowBuilder::new(&owner_window.app_handle(), "msa_auth", WindowUrl::External(auth_link))
     .title("Login with Microsoft")
     .maximizable(false)
     .resizable(false)
-    .max_inner_size(500_f64, 650_f64)
+    .max_inner_size(500.0, 650.0)
     .focused(true)
     .owner_window(owner_window.hwnd().unwrap())
     .build()?;
@@ -79,12 +83,19 @@ pub async fn get_msa_token(owner_window: &Window) -> Result<MSAuthToken, Box<dyn
     if !url.as_str().to_string().starts_with(REDIRECT_URL) {
       continue;
     }
-    let mut params = url.query_pairs();
-    let code = params.find(|(key, _)| key == "code").unwrap().1;
-    let state = params.find(|(key, _)| key == "state").unwrap().1;
-    break Ok((AuthorizationCode::new(code.to_string()), CsrfToken::new(state.to_string())));
+    let params: HashMap<Cow<str>, Cow<str>> = url.query_pairs().into_iter().collect();
+    if let (Some(code), Some(state)) = (params.get("code"), params.get("state")) {
+      let code = AuthorizationCode::new(code.to_string());
+      let state = CsrfToken::new(state.to_string());
+      break Ok((code, state));
+    } else {
+      let _ = window.close();
+      break Err(MSAuthError::UnexpectedError(format!("Couldn't extract authentication code: {}", url)));
+    }
   })?;
   window.close()?;
+
+  debug!("Got code: {}, state: {}", code.secret(), state.secret());
 
   // Check CSRF challenge
 
@@ -92,8 +103,9 @@ pub async fn get_msa_token(owner_window: &Window) -> Result<MSAuthToken, Box<dyn
     return Err(MSAuthError::CsrfMismatch(state.secret().clone(), csrf_state.secret().clone()))?;
   }
 
-  let tokens = client.exchange_code(code).set_pkce_verifier(pkce_code_verifier).request_async(async_http_client).await?;
-
+  debug!("Exchanging code for token...");
+  let tokens = client.exchange_code(code).set_pkce_verifier(pkce_code_verifier).request_async(async_http_client).await.unwrap();
+  debug!("Got token: {:?}", tokens);
   let tokens: MSAuthToken = MSATokenResponse::from(tokens).into();
   Ok(tokens)
 }
@@ -102,6 +114,7 @@ pub async fn get_msa_token(owner_window: &Window) -> Result<MSAuthToken, Box<dyn
 pub enum MSAuthError {
   #[error("Login process was cancelled by the user")] LoginCancelled,
   #[error("CSRF state mismatch ({0} != {1})")] CsrfMismatch(String, String),
+  #[error("Unexpected error: {0}")] UnexpectedError(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,12 +177,12 @@ impl From<StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>> for MSAT
   }
 }
 
-impl Into<MSAuthToken> for MSATokenResponse {
-  fn into(self) -> MSAuthToken {
+impl From<MSATokenResponse> for MSAuthToken {
+  fn from(val: MSATokenResponse) -> Self {
     MSAuthToken {
-      access_token: self.access_token,
-      refresh_token: self.refresh_token,
-      expiration_date: Utc::now().timestamp() + ((self.expires_in_seconds * 1000u64) as i64),
+      access_token: val.access_token,
+      refresh_token: val.refresh_token,
+      expiration_date: Utc::now().timestamp() + ((val.expires_in_seconds * 1000u64) as i64),
     }
   }
 }

@@ -10,18 +10,16 @@ mod game_status;
 mod log_flusher;
 mod forge;
 
-use std::{ env, io::BufRead, path::{ Path, PathBuf }, sync::Arc };
+use std::{ env, fs, io::BufRead, path::{ Path, PathBuf }, sync::Arc };
 
 use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
 use game_status::{ GameStatus, GameStatusState };
-use log::{ info, debug, error };
+use log::{ debug, error, info, warn };
 use log_flusher::flush_all_logs;
 use minecraft_launcher_core::{
-  options::{ GameOptionsBuilder, LauncherOptions },
-  profile_manager::auth::UserAuthentication,
-  progress_reporter::{ ProgressReporter, ProgressUpdate },
-  versions::info::MCVersion,
-  MinecraftGameRunner,
+  bootstrap::{ auth::UserAuthentication, options::{ GameOptionsBuilder, LauncherOptions }, GameBootstrap },
+  json::MCVersion,
+  version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
 };
 use modpack_downloader::ModpackInfo;
 use once_cell::sync::Lazy;
@@ -41,7 +39,7 @@ use crate::{
   modpack_downloader::{ ModpackDownloader, ModpackProvider },
 };
 
-static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(|| GameStatusState::new());
+static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(GameStatusState::new);
 
 const LAUNCHER_NAME: &str = env!("LAUNCHER_NAME");
 const LAUNCHER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -101,8 +99,8 @@ async fn start_game(
 #[derive(Default, Serialize, Clone)]
 pub struct DownloadProgress {
   pub status: String,
-  pub current: u32,
-  pub total: u32,
+  pub current: usize,
+  pub total: usize,
 }
 
 async fn real_start_game(
@@ -122,30 +120,30 @@ async fn real_start_game(
     authentication.unwrap().clone()
   };
 
-  let monitor = {
+  let reporter: ProgressReporter = {
     let window = Arc::clone(&window);
     let progress = std::sync::Mutex::new(None::<DownloadProgress>);
     Arc::new(
-      ProgressReporter::new(move |update| {
+      CallbackReporter::new(move |event| {
         let progress = &mut *progress.lock().unwrap();
         let mut new_progress = progress.clone().unwrap_or_default();
-        let clear = matches!(update, ProgressUpdate::Clear);
-        match update {
-          ProgressUpdate::SetStatus(status) => {
+        let done = matches!(event, Event::Done);
+        match event {
+          Event::Status(status) => {
             new_progress.status = status;
           }
-          ProgressUpdate::SetProgress(current) => {
+          Event::Progress(current) => {
             new_progress.current = current;
           }
-          ProgressUpdate::SetTotal(total) => {
+          Event::Total(total) => {
             new_progress.total = total;
           }
-          ProgressUpdate::SetAll(status, current, total) => {
-            new_progress = DownloadProgress { status, current, total };
+          Event::Setup { status, total } => {
+            new_progress = DownloadProgress { status, current: 0, total: total.unwrap_or(0) };
           }
-          ProgressUpdate::Clear => {}
+          _ => {}
         }
-        if clear {
+        if done {
           progress.take();
         } else {
           progress.replace(new_progress);
@@ -164,7 +162,7 @@ async fn real_start_game(
   debug!("Checking java runtime...");
   if !check_java_dir(&java_path) {
     info!("Java runtime not found. Downloading...");
-    download_java(monitor.clone(), &java_path, "17").await.map_err(|err| TauriError::Other(format!("Failed to download java: {}", err)))?;
+    download_java(reporter.clone(), &java_path, "17").await.map_err(|err| TauriError::Other(format!("Failed to download java: {}", err)))?;
     info!("Java downloaded successfully!");
   }
 
@@ -172,15 +170,15 @@ async fn real_start_game(
   {
     debug!("Checking modpack...");
     let selected_options = state.lock().await.selected_options.clone();
-    downloader.download_and_install(monitor.clone(), selected_options).await?;
+    downloader.download_and_install(reporter.clone(), selected_options).await?;
   }
 
   let ModpackInfo { minecraft_version, forge_version, .. } = downloader.get_or_fetch_modpack_info().await?;
-  let (forge_installer_path, forge_version_name) = forge::check_forge(&mc_dir, &minecraft_version, &forge_version, &java_executable_path).await?;
+  let (forge_installer_path, forge_version_name) = forge::check_forge(&mc_dir, minecraft_version, forge_version, &java_executable_path).await?;
   info!("Forge Version: {}", &forge_version_name);
 
-  let auth: Box<dyn UserAuthentication + Send + Sync> = authentication.try_into()?;
-  info!("Logged in as {}", auth.auth_player_name());
+  let auth: UserAuthentication = authentication.try_into()?;
+  info!("Logged in as {}", auth.username);
 
   let jvm_args = format!(
     "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
@@ -190,26 +188,44 @@ async fn real_start_game(
     mc_dir.join(format!("versions/{id}/{id}.jar", id = &forge_version_name)).display()
   );
   let jvm_args: Vec<String> = jvm_args
-    .split(" ")
+    .split(' ')
     .map(|s| s.to_string())
     .collect();
+
+  let mc_version = MCVersion::from(forge_version_name);
+  let natives_dir = mc_dir.join("natives");
+
+  if fs::remove_dir_all(&natives_dir).is_err() {
+    warn!("Couldn't cleanup natives directory");
+  }
 
   let game_opts = GameOptionsBuilder::default()
     .game_dir(mc_dir)
     .java_path(java_executable_path)
-    .version(MCVersion::from(forge_version_name))
     .launcher_options(LauncherOptions::new(LAUNCHER_NAME, LAUNCHER_VERSION))
     .authentication(auth)
     .jvm_args(jvm_args)
-    .max_concurrent_downloads(8)
-    .max_download_attempts(15)
-    .progress_reporter_arc(&monitor)
+    .natives_dir(natives_dir)
     .build()
     .map_err(|err| TauriError::Other(format!("Failed to create game options: {err}")))?;
+  let env_features = game_opts.env_features();
 
-  // TODO: VersionManager refresh takes a lot to get remote version list. try to fetch them at the start of the program
-  let mut process = MinecraftGameRunner::new(game_opts)
-    .launch().await
+  reporter.setup("Fetching version manifest", Some(2));
+  let mut version_manager = VersionManager::load(&game_opts.game_dir, &env_features, None).await?;
+
+  info!("Queuing library & version downloads");
+  reporter.status("Resolving local version");
+  reporter.progress(1);
+  let manifest = version_manager.resolve_local_version(&mc_version, true, false).await?;
+  if !manifest.applies_to_current_environment(&env_features) {
+    return Err(format!("Version {} is is incompatible with the current environment", mc_version).into());
+  }
+  reporter.done();
+
+  version_manager.download_required_files(&manifest, &reporter, None, None).await?;
+
+  let mut process = GameBootstrap::new(game_opts)
+    .launch_game(&manifest)
     .map_err(|err| TauriError::Other(format!("Failed to launch the game: {err}")))?;
 
   GAME_STATUS_STATE.set(GameStatus::Playing);
@@ -223,7 +239,7 @@ async fn real_start_game(
       }
     }
 
-    if process.stderr().buffer().len() > 0 {
+    if !process.stderr().buffer().is_empty() {
       if let Ok(length) = process.stderr().read_line(&mut buf) {
         if length > 0 {
           println!("{}", &buf.trim_end());
@@ -305,7 +321,7 @@ async fn main() {
 
   let mut context = tauri::generate_context!();
   let update_endpoints = {
-    let endpoints = env!("UPDATE_ENDPOINTS").split(" ");
+    let endpoints = env!("UPDATE_ENDPOINTS").split(' ');
     endpoints.map(|s| UpdaterEndpoint(s.parse().expect("Failed to parse update endpoint"))).collect::<Vec<_>>()
   };
   context.config_mut().tauri.updater.endpoints.replace(update_endpoints);

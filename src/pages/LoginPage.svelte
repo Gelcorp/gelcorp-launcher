@@ -31,7 +31,10 @@
     login_error = undefined;
 
     loginMicrosoft()
-      .catch((e) => (login_error = String(e)))
+      .catch((e) => {
+        console.error(e);
+        login_error = String(e);
+      })
       .finally(() => (logging_in = false));
   }
 </script>
