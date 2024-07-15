@@ -1,4 +1,4 @@
-use std::{ fs::{ self, File }, io::Write, path::PathBuf, sync::Mutex };
+use std::{ fs::{ self, File }, io::Write, path::Path, sync::Mutex };
 
 use chrono::Utc;
 use flate2::{ write::GzEncoder, Compression };
@@ -34,7 +34,8 @@ impl Filter for ModuleFilter {
   }
 }
 
-static CALLBACKS: Mutex<Vec<Box<dyn (Fn(&str) -> Result<(), Box<dyn std::error::Error>>) + Send + Sync>>> = Mutex::new(vec![]);
+type Callback = Box<dyn (Fn(&str) -> Result<(), Box<dyn std::error::Error>>) + Send + Sync>;
+static CALLBACKS: Mutex<Vec<Callback>> = Mutex::new(vec![]);
 
 #[derive(Debug)]
 pub struct LauncherAppender {
@@ -48,7 +49,7 @@ impl LauncherAppender {
     }
   }
 
-  pub fn add_callback(callback: Box<dyn (Fn(&str) -> Result<(), Box<dyn std::error::Error>>) + Send + Sync>) {
+  pub fn add_callback(callback: Callback) {
     CALLBACKS.lock().unwrap().push(callback);
   }
 }
@@ -56,7 +57,7 @@ impl LauncherAppender {
 impl Append for LauncherAppender {
   fn append(&self, record: &Record) -> anyhow::Result<()> {
     let mut writer = SimpleWriter(vec![]);
-    self.encoder.encode(&mut writer, &record)?;
+    self.encoder.encode(&mut writer, record)?;
     let msg = writer.0
       .into_iter()
       .map(|x| x as char)
@@ -73,7 +74,7 @@ impl Append for LauncherAppender {
   fn flush(&self) {}
 }
 
-pub fn setup_logger(logs_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+pub fn setup_logger(logs_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
   let date = Utc::now().format("%Y-%m-%d").to_string();
   let latest_log = logs_dir.join("latest.log");
   let gzipped_log = {

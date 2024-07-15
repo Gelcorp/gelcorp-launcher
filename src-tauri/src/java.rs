@@ -1,18 +1,18 @@
 use std::{
-  path::PathBuf,
-  time::Duration,
-  env::consts::{ OS, ARCH },
-  fs::{ create_dir_all, File, self },
-  io::{ BufWriter, Write, self },
-  process::{ Command, Stdio },
+  env::consts::{ ARCH, OS },
+  fs::{ self, create_dir_all, File },
+  io::{ self, BufWriter, Write },
   os::windows::process::CommandExt,
+  path::{ Path, PathBuf },
+  process::{ Command, Stdio },
+  time::Duration,
 };
 
 use minecraft_launcher_core::version_manager::downloader::progress::ProgressReporter;
 use reqwest::ClientBuilder;
 use zip::ZipArchive;
 
-pub fn check_java_dir(java_dir: &PathBuf) -> bool {
+pub fn check_java_dir(java_dir: &Path) -> bool {
   let java = java_dir.join("bin").join("java.exe");
   if !java.is_file() {
     return false;
@@ -72,7 +72,7 @@ pub async fn download_java(reporter: ProgressReporter, java_dir: &PathBuf, java_
     reporter.setup("Extracting java", Some(total));
     for i in 0..total {
       let mut zip_archive = archive.by_index(i)?;
-      if let Some((_, file_name)) = zip_archive.name().split_once("/") {
+      if let Some((_, file_name)) = zip_archive.name().split_once('/') {
         progress += 1;
         reporter.status(&format!("Extracting {}", file_name));
         reporter.progress(progress);
@@ -84,7 +84,7 @@ pub async fn download_java(reporter: ProgressReporter, java_dir: &PathBuf, java_
           continue;
         }
 
-        if file_name.ends_with("/") {
+        if file_name.ends_with('/') {
           create_dir_all(target_path)?;
         } else {
           create_dir_all(target_path.parent().unwrap())?;

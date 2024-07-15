@@ -1,4 +1,4 @@
-use std::{ fs::{ self, create_dir_all, File }, path::PathBuf };
+use std::{ fs::{ self, create_dir_all, File }, path::{ Path, PathBuf } };
 
 use forge_downloader::{
   download_utils::forge::ForgeVersionHandler,
@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::{ StdError, TauriError };
 
-pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str, java_path: &PathBuf) -> Result<(PathBuf, String), TauriError> {
+pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str, java_path: &Path) -> Result<(PathBuf, String), TauriError> {
   let versions_dir = mc_dir.join("versions");
 
   // Fetch version
@@ -24,7 +24,6 @@ pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str
     let forge_folder_re = Regex::new(&format!("{}.+{}", mc_version, forge_version)).unwrap();
     let forge_version_name = versions_dir
       .read_dir()?
-      .into_iter()
       .filter_map(|dir| dir.ok())
       .filter_map(|dir| dir.file_name().into_string().ok())
       .find(|name| forge_folder_re.is_match(name));
@@ -44,13 +43,13 @@ pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str
   }
 
   // Open installer
-  let mut install_handler = ForgeClientInstall::new(installer_path.clone(), java_path.clone())?;
+  let mut install_handler = ForgeClientInstall::new(installer_path.clone(), java_path.to_path_buf())?;
   let forge_version_id = install_handler.get_profile().get_version_id();
 
   let forge_version_path = mc_dir.join(format!("versions/{id}/{id}.json", id = &forge_version_id));
   if !forge_version_path.is_file() {
     info!("Forge not installed! Setting up forge...");
-    install_handler.install_forge(&mc_dir, |_| true).await?;
+    install_handler.install_forge(mc_dir, |_| true).await?;
     debug!("Setting up forge wrapper...");
     setup_forge_wrapper(&forge_version_path)?;
     info!("Forge installed!");

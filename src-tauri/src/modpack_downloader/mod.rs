@@ -1,6 +1,6 @@
 pub mod keys;
 
-use std::{ fs::{ self, create_dir_all }, io::{ Cursor, Write }, path::PathBuf, time::Duration };
+use std::{ fs::{ self, create_dir_all }, io::{ Cursor, Write }, path::{ Path, PathBuf }, time::Duration };
 
 use aes::{ cipher::{ block_padding::Pkcs7, BlockDecryptMut, KeyIvInit }, Aes256 };
 use cbc::Decryptor;
@@ -63,7 +63,7 @@ pub struct ModpackProvider {
 
 impl ModpackProvider {
   pub fn new(base_url: &str) -> Self {
-    let base_url = if !base_url.ends_with("/") { Url::parse(&(base_url.to_owned() + "/")).unwrap() } else { Url::parse(base_url).unwrap() };
+    let base_url = if !base_url.ends_with('/') { Url::parse(&(base_url.to_owned() + "/")).unwrap() } else { Url::parse(base_url).unwrap() };
     Self {
       base_url,
       client: ClientBuilder::new().connect_timeout(Duration::from_millis(5000)).build().unwrap(),
@@ -224,7 +224,7 @@ impl ModpackDownloader {
       info!("   Remote modpack downloaded! Verifying checksum...");
       let manual_checksum: [u8; 32] = <Sha256 as Digest>::digest(&remote_modpack).into();
       if manual_checksum != remote_checksum {
-        warn!("   Checksum mismatch. Download failed! (Remote: {}, Downloaded: {})", hex::encode(&remote_checksum), hex::encode(&manual_checksum));
+        warn!("   Checksum mismatch. Download failed! (Remote: {}, Downloaded: {})", hex::encode(remote_checksum), hex::encode(manual_checksum));
         continue;
       }
 
@@ -234,7 +234,7 @@ impl ModpackDownloader {
       }
 
       info!("   Modpack verified! Saving files...");
-      create_dir_all(&local_modpack_dir_path)?;
+      create_dir_all(local_modpack_dir_path)?;
       fs::File::create(&local_modpack_path)?.write_all(&remote_modpack)?;
       fs::File::create(&local_modpack_sig_path)?.write_all(&signature)?;
       should_install = true;
@@ -274,7 +274,7 @@ impl ModpackDownloader {
 
   fn try_install_modpack(&self, aes_decoder: Decryptor<Aes256>, local_modpack_path: &PathBuf, chosen_optionals: Vec<String>) -> Result<(), StdError> {
     info!("Decoding modpack...");
-    let mut bytes = fs::read(&local_modpack_path)?;
+    let mut bytes = fs::read(local_modpack_path)?;
     let decoded = aes_decoder.decrypt_padded_mut::<Pkcs7>(&mut bytes).map_err(|err| format!("Failed to decrypt modpack: {err}"))?;
     let archive = ZipArchive::new(Cursor::new(decoded)).map_err(|err| format!("Failed to open modpack archive: {err}"))?;
 
@@ -303,8 +303,8 @@ impl ModpackDownloader {
   }
 }
 
-fn get_local_modpack_enc_hash(local_modpack_path: &PathBuf) -> Result<[u8; 32], StdError> {
-  let bytes = fs::read(&local_modpack_path)?;
+fn get_local_modpack_enc_hash(local_modpack_path: &Path) -> Result<[u8; 32], StdError> {
+  let bytes = fs::read(local_modpack_path)?;
   let sum = <Sha256 as Digest>::digest(bytes);
   Ok(sum.into())
 }

@@ -52,15 +52,13 @@ impl LauncherConfig {
   }
 
   pub(crate) async fn validate_session(&mut self) {
-    if let Some(authentication) = self.authentication.as_mut() {
-      if let Authentication::Msa(msa) = authentication {
-        if let Err(err) = msa.refresh(false).await {
-          error!("Failed to refresh msa token: {}", err);
-          self.authentication = None;
-          let _ = self.save_to_file();
-        } else {
-          info!("Logged in successfully to msa");
-        }
+    if let Some(Authentication::Msa(msa)) = self.authentication.as_mut() {
+      if let Err(err) = msa.refresh(false).await {
+        error!("Failed to refresh msa token: {}", err);
+        self.authentication = None;
+        let _ = self.save_to_file();
+      } else {
+        info!("Logged in successfully to msa");
       }
     }
   }
@@ -86,7 +84,7 @@ impl LauncherConfig {
 
   fn default_providers() -> Vec<String> {
     env!("DEFAULT_PROVIDERS")
-      .split(" ")
+      .split(' ')
       .map(|s| s.to_string())
       .collect()
   }

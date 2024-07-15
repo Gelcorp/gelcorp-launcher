@@ -43,7 +43,7 @@ static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(GameStatusState::new
 
 const LAUNCHER_NAME: &str = env!("LAUNCHER_NAME");
 const LAUNCHER_VERSION: &str = env!("CARGO_PKG_VERSION");
-const GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path(&env!("GAME_DIR_PATH")));
+const GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path(env!("GAME_DIR_PATH")));
 
 type StdError = Box<dyn std::error::Error>;
 

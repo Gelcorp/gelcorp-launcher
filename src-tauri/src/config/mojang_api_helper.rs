@@ -35,8 +35,8 @@ pub enum State {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum SkinType {
-  SLIM,
-  CLASSIC,
+  Slim,
+  Classic,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
