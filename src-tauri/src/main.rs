@@ -43,7 +43,7 @@ static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(GameStatusState::new
 
 const LAUNCHER_NAME: &str = env!("LAUNCHER_NAME");
 const LAUNCHER_VERSION: &str = env!("CARGO_PKG_VERSION");
-const GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path(env!("GAME_DIR_PATH")));
+static GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path(env!("GAME_DIR_PATH")));
 
 type StdError = Box<dyn std::error::Error>;
 
@@ -154,7 +154,7 @@ async fn real_start_game(
   };
 
   info!("Attempting to launch the game...");
-  let mc_dir = GAME_DIR_PATH.clone();
+  let mc_dir = &*GAME_DIR_PATH;
   let java_path = mc_dir.join("jre-runtime");
   let java_executable_path = java_path.join("bin").join("java.exe");
 
@@ -174,7 +174,7 @@ async fn real_start_game(
   }
 
   let ModpackInfo { minecraft_version, forge_version, .. } = downloader.get_or_fetch_modpack_info().await?;
-  let (forge_installer_path, forge_version_name) = forge::check_forge(&mc_dir, minecraft_version, forge_version, &java_executable_path).await?;
+  let (forge_installer_path, forge_version_name) = forge::check_forge(mc_dir, minecraft_version, forge_version, &java_executable_path).await?;
   info!("Forge Version: {}", &forge_version_name);
 
   let auth: UserAuthentication = authentication.try_into()?;
@@ -200,7 +200,7 @@ async fn real_start_game(
   }
 
   let game_opts = GameOptionsBuilder::default()
-    .game_dir(mc_dir)
+    .game_dir(mc_dir.clone())
     .java_path(java_executable_path)
     .launcher_options(LauncherOptions::new(LAUNCHER_NAME, LAUNCHER_VERSION))
     .authentication(auth)
@@ -337,7 +337,7 @@ async fn main() {
     })
     .plugin(log_flusher::init())
     .manage(Mutex::new(launcher_config))
-    .manage(Mutex::new(ModpackDownloader::new(GAME_DIR_PATH.to_path_buf(), providers)))
+    .manage(Mutex::new(ModpackDownloader::new(GAME_DIR_PATH.clone(), providers)))
     .invoke_handler(
       tauri::generate_handler![
         start_game,
