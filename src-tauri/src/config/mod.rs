@@ -7,7 +7,7 @@ use log::{ error, info };
 use serde::{ Deserialize, Serialize };
 use tauri::Window;
 
-use crate::{ StdError, GAME_DIR_PATH };
+use crate::{ StdError, LAUNCHER_DIRECTORY };
 
 use self::auth::Authentication;
 
@@ -38,7 +38,7 @@ impl Default for LauncherConfig {
 
 impl LauncherConfig {
   pub(crate) fn get_file_path() -> PathBuf {
-    GAME_DIR_PATH.join("launcher_config.json")
+    LAUNCHER_DIRECTORY.join("launcher_config.json")
   }
 
   pub(crate) async fn load_from_file() -> Self {

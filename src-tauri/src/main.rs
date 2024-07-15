@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 
+pub mod constants;
+
 mod msa_auth;
 mod config;
 mod logger;
@@ -10,9 +12,10 @@ mod game_status;
 mod log_flusher;
 mod forge;
 
-use std::{ env, fs, io::BufRead, path::{ Path, PathBuf }, sync::Arc };
+use std::{ fs, io::BufRead, sync::Arc };
 
 use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
+use constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION };
 use game_status::{ GameStatus, GameStatusState };
 use log::{ debug, error, info, warn };
 use log_flusher::flush_all_logs;
@@ -23,7 +26,6 @@ use minecraft_launcher_core::{
 };
 use modpack_downloader::ModpackInfo;
 use once_cell::sync::Lazy;
-use regex::{ Captures, Regex };
 use serde::Serialize;
 use sysinfo::System;
 use tauri::{ utils::config::UpdaterEndpoint, Builder, Manager, State, Window };
@@ -40,10 +42,6 @@ use crate::{
 };
 
 static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(GameStatusState::new);
-
-const LAUNCHER_NAME: &str = env!("LAUNCHER_NAME");
-const LAUNCHER_VERSION: &str = env!("CARGO_PKG_VERSION");
-static GAME_DIR_PATH: Lazy<PathBuf> = Lazy::new(|| resolve_path(env!("GAME_DIR_PATH")));
 
 type StdError = Box<dyn std::error::Error>;
 
@@ -154,7 +152,7 @@ async fn real_start_game(
   };
 
   info!("Attempting to launch the game...");
-  let mc_dir = &*GAME_DIR_PATH;
+  let mc_dir = &*LAUNCHER_DIRECTORY;
   let java_path = mc_dir.join("jre-runtime");
   let java_executable_path = java_path.join("bin").join("java.exe");
 
@@ -303,7 +301,7 @@ async fn login_msa(state: State<'_, Mutex<LauncherConfig>>, window: Window) -> R
 
 #[tokio::main]
 async fn main() {
-  let logs_dir = GAME_DIR_PATH.join("logs/gelcorp-launcher");
+  let logs_dir = LAUNCHER_DIRECTORY.join("logs/gelcorp-launcher");
   setup_logger(&logs_dir).expect("Failed to initialize logger");
   info!("Starting tauri application...");
   LauncherAppender::add_callback(
@@ -337,7 +335,7 @@ async fn main() {
     })
     .plugin(log_flusher::init())
     .manage(Mutex::new(launcher_config))
-    .manage(Mutex::new(ModpackDownloader::new(GAME_DIR_PATH.clone(), providers)))
+    .manage(Mutex::new(ModpackDownloader::new(LAUNCHER_DIRECTORY.clone(), providers)))
     .invoke_handler(
       tauri::generate_handler![
         start_game,
@@ -352,30 +350,4 @@ async fn main() {
     )
     .run(context)
     .expect("error while running tauri application");
-}
-
-fn resolve_path(path: impl AsRef<Path>) -> PathBuf {
-  let path = path.as_ref();
-  let regex = Regex::new(r"%([a-zA-Z0-9]+)%").unwrap();
-  let mut new_path_buf = PathBuf::new();
-
-  for component in path.components() {
-    if let Some(component_str) = component.as_os_str().to_str() {
-      let replaced_component = regex
-        .replace_all(component_str, |captures: &Captures| {
-          match env::var(&captures[1]) {
-            Ok(value) => value,
-            Err(_) => captures[0].to_string(),
-          }
-        })
-        .as_ref()
-        .to_string();
-
-      new_path_buf.push(Path::new(&replaced_component));
-    } else {
-      new_path_buf.push(component);
-    }
-  }
-
-  new_path_buf
 }
