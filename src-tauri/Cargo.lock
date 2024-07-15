@@ -1022,6 +1022,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "expand_str"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7bfbc9fbd454fca65e24c398c860da7bf0b76d0d4e62eb89e2e72d69e18a0e4"
+
+[[package]]
 name = "fastrand"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1322,6 +1328,7 @@ dependencies = [
  "chrono",
  "derive_builder 0.12.0",
  "dotenv-build",
+ "expand_str",
  "flate2",
  "forge-downloader",
  "futures",
