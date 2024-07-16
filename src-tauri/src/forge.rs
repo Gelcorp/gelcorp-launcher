@@ -10,9 +10,9 @@ use regex::Regex;
 use reqwest::Client;
 use serde_json::json;
 
-use crate::app::error::{ StdError, TauriError };
+use crate::app::error::{ StdError, LauncherError };
 
-pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str, java_path: &Path) -> Result<(PathBuf, String), TauriError> {
+pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str, java_path: &Path) -> Result<(PathBuf, String), LauncherError> {
   let versions_dir = mc_dir.join("versions");
 
   // Fetch version

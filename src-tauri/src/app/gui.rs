@@ -15,12 +15,12 @@ use crate::{
   msa_auth,
 };
 
-use super::{ error::TauriError, game::real_start_game, state::LauncherState };
+use super::{ error::LauncherError, game::real_start_game, state::LauncherState };
 
 pub static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(GameStatusState::new);
 
 #[tauri::command]
-async fn fetch_modpack_info(state: State<'_, LauncherState>) -> Result<ModpackInfo, TauriError> {
+async fn fetch_modpack_info(state: State<'_, LauncherState>) -> Result<ModpackInfo, LauncherError> {
   let mut downloader = state.modpack_downloader.lock().await;
   let modpack_info = downloader.get_or_fetch_modpack_info().await?;
   Ok(modpack_info.clone())
@@ -32,7 +32,7 @@ fn get_system_memory() -> u64 {
 }
 
 #[tauri::command]
-async fn start_game(state: State<'_, LauncherState>, window: Window) -> Result<(), TauriError> where Window: Sync {
+async fn start_game(state: State<'_, LauncherState>, window: Window) -> Result<(), LauncherError> where Window: Sync {
   let window = Arc::new(window);
   let res = real_start_game(state, window.clone()).await.map_err(|e| e.into());
   flush_all_logs(&window.app_handle());
@@ -49,12 +49,12 @@ fn get_game_status() -> GameStatus {
 }
 
 #[tauri::command]
-async fn get_launcher_config(state: State<'_, LauncherState>) -> Result<LauncherConfig, TauriError> {
+async fn get_launcher_config(state: State<'_, LauncherState>) -> Result<LauncherConfig, LauncherError> {
   Ok(state.launcher_config.lock().await.clone())
 }
 
 #[tauri::command]
-async fn set_launcher_config(state: State<'_, LauncherState>, config: LauncherConfig) -> Result<(), TauriError> {
+async fn set_launcher_config(state: State<'_, LauncherState>, config: LauncherConfig) -> Result<(), LauncherError> {
   let mut state = state.launcher_config.lock().await;
   *state = config;
   state.save_to_file()?;
@@ -62,7 +62,7 @@ async fn set_launcher_config(state: State<'_, LauncherState>, config: LauncherCo
 }
 
 #[tauri::command]
-async fn login_offline(state: State<'_, LauncherState>, window: Window, username: String) -> Result<(), TauriError> {
+async fn login_offline(state: State<'_, LauncherState>, window: Window, username: String) -> Result<(), LauncherError> {
   let mut state = state.launcher_config.lock().await;
   let uuid = Uuid::new_v3(&Uuid::NAMESPACE_DNS, format!("OfflinePlayer:{username}").as_bytes()).to_string();
   state.authentication.replace(Authentication::Offline { username, uuid });
@@ -72,9 +72,9 @@ async fn login_offline(state: State<'_, LauncherState>, window: Window, username
 }
 
 #[tauri::command]
-async fn login_msa(state: State<'_, LauncherState>, window: Window) -> Result<(), TauriError> {
-  let ms_auth_token = msa_auth::get_msa_token(&window).await.map_err(|err| TauriError::Other(format!("Failed to get msa token: {}", err)))?;
-  let auth = MsaMojangAuth::from(ms_auth_token).await.map_err(|err| TauriError::Other(format!("Failed to login: {}", err)))?;
+async fn login_msa(state: State<'_, LauncherState>, window: Window) -> Result<(), LauncherError> {
+  let ms_auth_token = msa_auth::get_msa_token(&window).await.map_err(|err| LauncherError::Other(format!("Failed to get msa token: {}", err)))?;
+  let auth = MsaMojangAuth::from(ms_auth_token).await.map_err(|err| LauncherError::Other(format!("Failed to login: {}", err)))?;
 
   let mut state = state.launcher_config.lock().await;
   state.authentication.replace(Authentication::Msa(auth));

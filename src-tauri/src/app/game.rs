@@ -9,7 +9,7 @@ use minecraft_launcher_core::{
 use tauri::{ State, Window };
 
 use crate::{
-  app::{ error::TauriError, gui::GAME_STATUS_STATE },
+  app::{ error::LauncherError, gui::GAME_STATUS_STATE },
   constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION },
   forge,
   game_status::GameStatus,
@@ -74,7 +74,7 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
   debug!("Checking java runtime...");
   if !check_java_dir(&java_path) {
     info!("Java runtime not found. Downloading...");
-    download_java(reporter.clone(), &java_path, "17").await.map_err(|err| TauriError::Other(format!("Failed to download java: {}", err)))?;
+    download_java(reporter.clone(), &java_path, "17").await.map_err(|err| LauncherError::Other(format!("Failed to download java: {}", err)))?;
     info!("Java downloaded successfully!");
   }
 
@@ -119,7 +119,7 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
     .jvm_args(jvm_args)
     .natives_dir(natives_dir)
     .build()
-    .map_err(|err| TauriError::Other(format!("Failed to create game options: {err}")))?;
+    .map_err(|err| LauncherError::Other(format!("Failed to create game options: {err}")))?;
   let env_features = game_opts.env_features();
 
   reporter.setup("Fetching version manifest", Some(2));
@@ -138,7 +138,7 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
 
   let mut process = GameBootstrap::new(game_opts)
     .launch_game(&manifest)
-    .map_err(|err| TauriError::Other(format!("Failed to launch the game: {err}")))?;
+    .map_err(|err| LauncherError::Other(format!("Failed to launch the game: {err}")))?;
 
   GAME_STATUS_STATE.set(GameStatus::Playing);
   loop {
