@@ -23,15 +23,12 @@ use serde::{ Deserialize, Serialize };
 use tauri::{ WindowBuilder, WindowUrl, Manager, Window };
 use thiserror::Error;
 
-const CLIENT_ID: &str = std::env!("MSA_CLIENT_ID");
-const REDIRECT_URL: &str = "https://login.live.com/oauth20_desktop.srf";
-const AUTHORIZE_URL: &str = "https://login.live.com/oauth20_authorize.srf";
-const TOKEN_URL: &str = "https://login.live.com/oauth20_token.srf";
+use crate::constants::{ AUTHORIZE_URL, MSA_CLIENT_ID, REDIRECT_URL, TOKEN_URL };
 
 pub async fn get_msa_token(owner_window: &Window) -> Result<MSAuthToken, Box<dyn std::error::Error>> {
   // Generate auth link and pkce challenge
   let client = BasicClient::new(
-    ClientId::new(CLIENT_ID.to_string()),
+    ClientId::new(MSA_CLIENT_ID.to_string()),
     None,
     AuthUrl::new(AUTHORIZE_URL.to_string())?,
     Some(TokenUrl::new(TOKEN_URL.to_string())?)
@@ -136,7 +133,7 @@ impl MSAuthToken {
     let url = Url::parse_with_params(
       TOKEN_URL,
       &[
-        ("client_id", CLIENT_ID),
+        ("client_id", MSA_CLIENT_ID),
         ("refresh_token", &self.refresh_token),
         ("grant_type", "refresh_token"),
       ]
