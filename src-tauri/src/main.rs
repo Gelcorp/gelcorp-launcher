@@ -9,7 +9,6 @@ mod config;
 mod logger;
 mod java;
 mod modpack_downloader;
-mod game_status;
 mod log_flusher;
 mod forge;
 

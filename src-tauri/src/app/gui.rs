@@ -9,13 +9,12 @@ use uuid::Uuid;
 use crate::{
   config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig },
   constants::{ LAUNCHER_NAME, LAUNCHER_VERSION },
-  game_status::{ GameStatus, GameStatusState },
   log_flusher::{ self, flush_all_logs },
   modpack_downloader::ModpackInfo,
   msa_auth,
 };
 
-use super::{ error::LauncherError, game::real_start_game, state::LauncherState };
+use super::{ error::LauncherError, game::real_start_game, game_status::{ GameStatus, GameStatusState }, state::LauncherState };
 
 pub static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(GameStatusState::new);
 

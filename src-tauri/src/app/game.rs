@@ -9,10 +9,9 @@ use minecraft_launcher_core::{
 use tauri::{ State, Window };
 
 use crate::{
-  app::{ error::LauncherError, gui::GAME_STATUS_STATE },
+  app::{ error::LauncherError, game_status::GameStatus, gui::GAME_STATUS_STATE },
   constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION },
   forge,
-  game_status::GameStatus,
   java::{ check_java_dir, download_java },
   log_flusher::GAME_LOGS,
   modpack_downloader::ModpackInfo,
