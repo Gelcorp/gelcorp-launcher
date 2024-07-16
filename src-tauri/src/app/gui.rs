@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use log::error;
 use sysinfo::System;
 use tauri::{ utils::config::UpdaterEndpoint, Builder, Manager, State, Window };
@@ -13,7 +11,7 @@ use crate::{
   msa_auth,
 };
 
-use super::{ error::LauncherError, game::real_start_game, game_status::GameStatus, state::LauncherState };
+use super::{ error::LauncherError, game, game_status::GameStatus, state::LauncherState };
 
 #[tauri::command]
 async fn fetch_modpack_info(state: State<'_, LauncherState>) -> Result<ModpackInfo, LauncherError> {
@@ -29,8 +27,7 @@ fn get_system_memory() -> u64 {
 
 #[tauri::command]
 async fn start_game(state: State<'_, LauncherState>, window: Window) -> Result<(), LauncherError> where Window: Sync {
-  let window = Arc::new(window);
-  let res = real_start_game(state.clone(), window.clone()).await.map_err(|e| e.into());
+  let res = game::launch_game(&state, &window).await.map_err(|e| e.into());
   flush_all_logs(&window.app_handle());
   if let Err(err) = &res {
     error!("Failed to start game: {}", err);

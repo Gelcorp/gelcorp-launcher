@@ -1,4 +1,4 @@
-use std::{ fs, io::BufRead, sync::Arc };
+use std::{ fs, io::BufRead, sync::{ Arc, Mutex } };
 
 use log::{ debug, info, warn };
 use minecraft_launcher_core::{
@@ -6,7 +6,7 @@ use minecraft_launcher_core::{
   json::MCVersion,
   version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
 };
-use tauri::{ State, Window };
+use tauri::Window;
 
 use crate::{
   app::{ error::LauncherError, game_status::GameStatus },
@@ -20,20 +20,22 @@ use crate::{
 
 use super::{ error::StdError, state::LauncherState };
 
-pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window>) -> Result<(), StdError> where Window: Sync {
+pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), StdError> where Window: Sync {
+  let LauncherState { launcher_config, modpack_downloader, game_status } = state;
+
   let authentication = {
-    let config = state.launcher_config.lock().await;
+    let config = launcher_config.lock().await;
     let authentication = config.authentication.as_ref();
     if authentication.is_none() {
-      config.broadcast_update(&window)?;
+      config.broadcast_update(window)?;
       return Err("Not logged in!".into());
     }
     authentication.unwrap().clone()
   };
 
   let reporter: ProgressReporter = {
-    let window = Arc::clone(&window);
-    let progress = std::sync::Mutex::new(None::<DownloadProgress>);
+    let window = window.clone();
+    let progress = Mutex::new(None::<DownloadProgress>);
     Arc::new(
       CallbackReporter::new(move |event| {
         let progress = &mut *progress.lock().unwrap();
@@ -69,7 +71,7 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
   let java_path = mc_dir.join("jre-runtime");
   let java_executable_path = java_path.join("bin").join("java.exe");
 
-  state.game_status.set(GameStatus::Downloading);
+  game_status.set(GameStatus::Downloading);
   debug!("Checking java runtime...");
   if !check_java_dir(&java_path) {
     info!("Java runtime not found. Downloading...");
@@ -77,10 +79,10 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
     info!("Java downloaded successfully!");
   }
 
-  let mut downloader = state.modpack_downloader.lock().await;
+  let mut downloader = modpack_downloader.lock().await;
   {
     debug!("Checking modpack...");
-    let selected_options = state.launcher_config.lock().await.selected_options.clone();
+    let selected_options = launcher_config.lock().await.selected_options.clone();
     downloader.download_and_install(reporter.clone(), selected_options).await?;
   }
 
@@ -93,7 +95,7 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
 
   let jvm_args = format!(
     "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
-    state.launcher_config.lock().await.memory_max,
+    launcher_config.lock().await.memory_max,
     mc_dir.join("libraries").display(),
     forge_installer_path.display(),
     mc_dir.join(format!("versions/{id}/{id}.jar", id = &forge_version_name)).display()
@@ -139,7 +141,7 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
     .launch_game(&manifest)
     .map_err(|err| LauncherError::Other(format!("Failed to launch the game: {err}")))?;
 
-  state.game_status.set(GameStatus::Playing);
+  game_status.set(GameStatus::Playing);
   loop {
     let mut buf = String::new();
     if let Ok(length) = process.stdout().read_line(&mut buf) {
