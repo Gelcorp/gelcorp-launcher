@@ -20,12 +20,14 @@ use oauth2::{
 };
 use reqwest::Url;
 use serde::{ Deserialize, Serialize };
-use tauri::{ WindowBuilder, WindowUrl, Manager, Window };
+use tauri::{ Manager, Window, WindowBuilder, WindowEvent, WindowUrl };
 use thiserror::Error;
 
 use crate::constants::{ AUTHORIZE_URL, MSA_CLIENT_ID, REDIRECT_URL, TOKEN_URL };
 
-pub async fn get_msa_token(owner_window: &Window) -> Result<MSAuthToken, Box<dyn std::error::Error>> {
+use super::error::StdError;
+
+pub async fn show_microsoft_prompt(owner_window: &Window) -> Result<MSAuthToken, StdError> {
   // Generate auth link and pkce challenge
   let client = BasicClient::new(
     ClientId::new(MSA_CLIENT_ID.to_string()),
@@ -49,22 +51,26 @@ pub async fn get_msa_token(owner_window: &Window) -> Result<MSAuthToken, Box<dyn
   debug!("Auth link: {}", auth_link);
 
   // Open window and wait for redirect
-  let window = WindowBuilder::new(&owner_window.app_handle(), "msa_auth", WindowUrl::External(auth_link))
-    .title("Login with Microsoft")
-    .maximizable(false)
-    .resizable(false)
-    .max_inner_size(500.0, 650.0)
-    .focused(true)
-    .owner_window(owner_window.hwnd().unwrap())
-    .build()?;
+  let window = {
+    let app_handle = owner_window.app_handle();
+    let mut builder = WindowBuilder::new(&app_handle, "msa_auth", WindowUrl::External(auth_link))
+      .title("Login with Microsoft")
+      .maximizable(false)
+      .resizable(false)
+      .max_inner_size(500.0, 650.0)
+      .focused(true);
+    if let Ok(hwnd) = owner_window.hwnd() {
+      builder = builder.owner_window(hwnd);
+    }
+    builder.build()?
+  };
 
   let is_window_closed = Arc::new(Mutex::new(false));
   {
     let is_window_closed = Arc::clone(&is_window_closed);
     window.on_window_event(move |event| {
-      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-        let mut is_window_closed = is_window_closed.lock().unwrap();
-        *is_window_closed = true;
+      if let WindowEvent::CloseRequested { api, .. } = event {
+        *is_window_closed.lock().unwrap() = true;
         api.prevent_close();
       }
     });
@@ -101,10 +107,9 @@ pub async fn get_msa_token(owner_window: &Window) -> Result<MSAuthToken, Box<dyn
   }
 
   debug!("Exchanging code for token...");
-  let tokens = client.exchange_code(code).set_pkce_verifier(pkce_code_verifier).request_async(async_http_client).await.unwrap();
+  let tokens = client.exchange_code(code).set_pkce_verifier(pkce_code_verifier).request_async(async_http_client).await?;
   debug!("Got token: {:?}", tokens);
-  let tokens: MSAuthToken = MSATokenResponse::from(tokens).into();
-  Ok(tokens)
+  Ok(MSATokenResponse::from(tokens).into())
 }
 
 #[derive(Debug, Error)]

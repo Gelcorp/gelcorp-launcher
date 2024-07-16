@@ -65,7 +65,9 @@ async fn login_offline(state: State<'_, LauncherState>, window: Window, username
 
 #[tauri::command]
 async fn login_msa(state: State<'_, LauncherState>, window: Window) -> Result<(), LauncherError> {
-  let ms_auth_token = msa_auth::get_msa_token(&window).await.map_err(|err| LauncherError::Other(format!("Failed to get msa token: {}", err)))?;
+  let ms_auth_token = msa_auth
+    ::show_microsoft_prompt(&window).await
+    .map_err(|err| LauncherError::Other(format!("Failed to get msa token: {}", err)))?;
   let auth = MsaMojangAuth::from(ms_auth_token).await.map_err(|err| LauncherError::Other(format!("Failed to login: {}", err)))?;
 
   let mut state = state.launcher_config.lock().await;
