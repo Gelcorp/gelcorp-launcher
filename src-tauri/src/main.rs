@@ -31,9 +31,10 @@ pub struct DownloadProgress {
 
 #[tokio::main]
 async fn main() {
-  let logs_dir = LAUNCHER_DIRECTORY.join("logs/gelcorp-launcher");
+  let logs_dir = LAUNCHER_DIRECTORY.join("logs").join("gelcorp-launcher");
   setup_logger(&logs_dir).expect("Failed to initialize logger");
   info!("Starting tauri application...");
+
   LauncherAppender::add_callback(
     Box::new(move |msg| {
       LAUNCHER_LOGS.log(msg.trim_end());
@@ -54,10 +55,10 @@ async fn main() {
     game_status: GameStatusState::new(),
   };
 
-  let update_endpoints = {
-    let endpoints = UPDATE_ENDPOINTS.split(' ');
-    endpoints.map(|s| UpdaterEndpoint(s.parse().expect("Failed to parse update endpoint"))).collect::<Vec<_>>()
-  };
+  let update_endpoints = UPDATE_ENDPOINTS.split(' ')
+    .map(|s| s.parse().expect("Failed to parse update endpoint"))
+    .map(UpdaterEndpoint)
+    .collect();
 
   app::gui::init(launcher_state, update_endpoints);
 }
