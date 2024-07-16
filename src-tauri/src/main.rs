@@ -16,7 +16,7 @@ mod forge;
 use std::{ fs, io::BufRead, sync::Arc };
 
 use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
-use constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION };
+use constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION, UPDATE_ENDPOINTS };
 use game_status::{ GameStatus, GameStatusState };
 use log::{ debug, error, info, warn };
 use log_flusher::flush_all_logs;
@@ -315,7 +315,7 @@ async fn main() {
 
   let mut context = tauri::generate_context!();
   let update_endpoints = {
-    let endpoints = env!("UPDATE_ENDPOINTS").split(' ');
+    let endpoints = UPDATE_ENDPOINTS.split(' ');
     endpoints.map(|s| UpdaterEndpoint(s.parse().expect("Failed to parse update endpoint"))).collect::<Vec<_>>()
   };
   context.config_mut().tauri.updater.endpoints.replace(update_endpoints);
