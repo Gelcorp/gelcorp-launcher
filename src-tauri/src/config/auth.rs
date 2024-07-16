@@ -10,11 +10,11 @@ use crate::{ app::error::StdError, config::mojang_api_helper::PlayerProfile, msa
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
-pub(crate) enum Authentication {
+pub enum Authentication {
   Msa(MsaMojangAuth),
   Offline {
     username: String,
-    uuid: String,
+    uuid: Uuid,
   },
 }
 
@@ -22,11 +22,11 @@ impl TryInto<UserAuthentication> for Authentication {
   type Error = StdError;
   fn try_into(self) -> Result<UserAuthentication, Self::Error> {
     match self {
-      Authentication::Msa(msa) => {
+      Authentication::Msa(MsaMojangAuth { username, uuid, moj_token, .. }) => {
         Ok(UserAuthentication {
-          username: msa.username,
-          uuid: Uuid::parse_str(&msa.uuid)?,
-          access_token: Some(msa.moj_token),
+          username,
+          uuid,
+          access_token: Some(moj_token),
         })
       }
       Authentication::Offline { username, .. } => Ok(UserAuthentication::offline(&username)),
@@ -35,9 +35,9 @@ impl TryInto<UserAuthentication> for Authentication {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub(crate) struct MsaMojangAuth {
+pub struct MsaMojangAuth {
   username: String,
-  uuid: String,
+  uuid: Uuid,
 
   moj_token: String,
   moj_expiration_date: i64,
@@ -48,11 +48,11 @@ pub(crate) struct MsaMojangAuth {
 }
 
 impl MsaMojangAuth {
-  pub(crate) fn expired_msa(&self) -> bool {
+  pub fn expired_msa(&self) -> bool {
     Utc::now().timestamp_millis() > self.msa_expiration_date
   }
 
-  pub(crate) async fn refresh(&mut self, force: bool) -> Result<(), StdError> {
+  pub async fn refresh(&mut self, force: bool) -> Result<(), StdError> {
     if self.expired_msa() || force {
       self.refresh_msa(force).await?;
     }
@@ -63,7 +63,7 @@ impl MsaMojangAuth {
     Ok(())
   }
 
-  pub(crate) async fn refresh_msa(&mut self, force: bool) -> Result<(), StdError> {
+  pub async fn refresh_msa(&mut self, force: bool) -> Result<(), StdError> {
     if !self.expired_msa() && !force {
       return Ok(());
     }
@@ -80,11 +80,11 @@ impl MsaMojangAuth {
     Ok(())
   }
 
-  pub(crate) fn expired_mojang(&self) -> bool {
+  pub fn expired_mojang(&self) -> bool {
     Utc::now().timestamp_millis() > self.moj_expiration_date
   }
 
-  pub(crate) async fn refresh_mojang(&mut self, force: bool) -> Result<(), StdError> {
+  pub async fn refresh_mojang(&mut self, force: bool) -> Result<(), StdError> {
     if !self.expired_mojang() && !force {
       return Ok(());
     }
@@ -99,19 +99,19 @@ impl MsaMojangAuth {
     Ok(())
   }
 
-  pub(crate) async fn refresh_profile(&mut self) -> Result<(), StdError> {
+  pub async fn refresh_profile(&mut self) -> Result<(), StdError> {
     info!("Fetching profile info...");
     let PlayerProfile { id, name, .. } = PlayerProfile::get(&Client::new(), &self.moj_token).await?;
     self.username = name;
-    self.uuid = id;
+    self.uuid = Uuid::parse_str(&id).unwrap();
     info!("Username = {} UUID = {}", self.username, self.uuid);
     Ok(())
   }
 
-  pub(crate) async fn from(msa: MSAuthToken) -> Result<Self, StdError> {
+  pub async fn from(msa: MSAuthToken) -> Result<Self, StdError> {
     let mut new = Self {
       username: String::new(),
-      uuid: String::new(),
+      uuid: Uuid::default(),
 
       moj_token: String::new(),
       moj_expiration_date: 0,
@@ -126,11 +126,11 @@ impl MsaMojangAuth {
 }
 
 impl From<MsaMojangAuth> for UserAuthentication {
-  fn from(moj_auth: MsaMojangAuth) -> Self {
+  fn from(MsaMojangAuth { username, uuid, moj_token, .. }: MsaMojangAuth) -> Self {
     UserAuthentication {
-      username: moj_auth.username,
-      uuid: Uuid::parse_str(&moj_auth.uuid).unwrap(),
-      access_token: Some(moj_auth.moj_token),
+      username,
+      uuid,
+      access_token: Some(moj_token),
     }
   }
 }

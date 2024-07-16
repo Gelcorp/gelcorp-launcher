@@ -1,7 +1,7 @@
 use log::error;
+use minecraft_launcher_core::bootstrap::auth::UserAuthentication;
 use sysinfo::System;
 use tauri::{ utils::config::UpdaterEndpoint, Builder, Manager, State, Window };
-use uuid::Uuid;
 
 use crate::{
   config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig },
@@ -57,8 +57,8 @@ async fn set_launcher_config(state: State<'_, LauncherState>, config: LauncherCo
 #[tauri::command]
 async fn login_offline(state: State<'_, LauncherState>, window: Window, username: String) -> Result<(), LauncherError> {
   let mut state = state.launcher_config.lock().await;
-  let uuid = Uuid::new_v3(&Uuid::NAMESPACE_DNS, format!("OfflinePlayer:{username}").as_bytes()).to_string();
-  state.authentication.replace(Authentication::Offline { username, uuid });
+  let auth = UserAuthentication::offline(&username);
+  state.authentication.replace(Authentication::Offline { username, uuid: auth.uuid });
   state.broadcast_update(&window)?;
   state.save_to_file()?;
   Ok(())
