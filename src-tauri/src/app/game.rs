@@ -9,7 +9,7 @@ use minecraft_launcher_core::{
 use tauri::{ State, Window };
 
 use crate::{
-  app::{ error::LauncherError, game_status::GameStatus, gui::GAME_STATUS_STATE },
+  app::{ error::LauncherError, game_status::GameStatus },
   constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION },
   forge,
   java::{ check_java_dir, download_java },
@@ -69,7 +69,7 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
   let java_path = mc_dir.join("jre-runtime");
   let java_executable_path = java_path.join("bin").join("java.exe");
 
-  GAME_STATUS_STATE.set(GameStatus::Downloading);
+  state.game_status.set(GameStatus::Downloading);
   debug!("Checking java runtime...");
   if !check_java_dir(&java_path) {
     info!("Java runtime not found. Downloading...");
@@ -139,7 +139,7 @@ pub async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window
     .launch_game(&manifest)
     .map_err(|err| LauncherError::Other(format!("Failed to launch the game: {err}")))?;
 
-  GAME_STATUS_STATE.set(GameStatus::Playing);
+  state.game_status.set(GameStatus::Playing);
   loop {
     let mut buf = String::new();
     if let Ok(length) = process.stdout().read_line(&mut buf) {

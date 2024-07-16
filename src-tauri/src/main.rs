@@ -12,7 +12,7 @@ mod modpack_downloader;
 mod log_flusher;
 mod forge;
 
-use app::state::LauncherState;
+use app::{ game_status::GameStatusState, state::LauncherState };
 use config::LauncherConfig;
 use constants::{ LAUNCHER_DIRECTORY, UPDATE_ENDPOINTS };
 use log::info;
@@ -52,6 +52,7 @@ async fn main() {
   let launcher_state = LauncherState {
     launcher_config: Mutex::new(launcher_config),
     modpack_downloader: Mutex::new(modpack_downloader),
+    game_status: GameStatusState::new(),
   };
 
   let update_endpoints = {
