@@ -3,6 +3,7 @@
 
 pub mod constants;
 
+mod error;
 mod state;
 mod msa_auth;
 mod config;
@@ -17,6 +18,7 @@ use std::{ fs, io::BufRead, sync::Arc };
 
 use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
 use constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION, UPDATE_ENDPOINTS };
+use error::{ StdError, TauriError };
 use game_status::{ GameStatus, GameStatusState };
 use log::{ debug, error, info, warn };
 use log_flusher::flush_all_logs;
@@ -32,7 +34,6 @@ use state::LauncherState;
 use sysinfo::System;
 use tauri::{ utils::config::UpdaterEndpoint, Builder, Manager, State, Window };
 
-use thiserror::Error;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -44,27 +45,6 @@ use crate::{
 };
 
 static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(GameStatusState::new);
-
-type StdError = Box<dyn std::error::Error>;
-
-#[derive(Debug, Error)]
-enum TauriError {
-  #[error(transparent)] Reqwest(#[from] reqwest::Error),
-  #[error(transparent)] Io(#[from] std::io::Error),
-  #[error("{0}")] Other(String),
-}
-
-impl From<StdError> for TauriError {
-  fn from(error: StdError) -> Self {
-    Self::Other(error.to_string())
-  }
-}
-
-impl Serialize for TauriError {
-  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {
-    serializer.serialize_str(&self.to_string())
-  }
-}
 
 #[tauri::command]
 async fn fetch_modpack_info(state: State<'_, LauncherState>) -> Result<ModpackInfo, TauriError> {
