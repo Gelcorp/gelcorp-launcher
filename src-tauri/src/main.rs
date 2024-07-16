@@ -4,7 +4,6 @@
 pub mod app;
 pub mod constants;
 
-mod msa_auth;
 mod config;
 mod logger;
 mod java;

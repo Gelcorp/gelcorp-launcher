@@ -6,7 +6,7 @@ use reqwest::Client;
 use serde::{ Deserialize, Serialize };
 use uuid::Uuid;
 
-use crate::{ app::error::StdError, config::mojang_api_helper::PlayerProfile, msa_auth::MSAuthToken };
+use crate::{ app::{ error::StdError, msa_auth::MSAuthToken }, config::mojang_api_helper::PlayerProfile };
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]

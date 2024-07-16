@@ -8,10 +8,9 @@ use crate::{
   constants::{ LAUNCHER_NAME, LAUNCHER_VERSION },
   log_flusher::{ self, flush_all_logs },
   modpack_downloader::ModpackInfo,
-  msa_auth,
 };
 
-use super::{ error::LauncherError, game, game_status::GameStatus, state::LauncherState };
+use super::{ error::LauncherError, game, game_status::GameStatus, msa_auth, state::LauncherState };
 
 #[tauri::command]
 async fn fetch_modpack_info(state: State<'_, LauncherState>) -> Result<ModpackInfo, LauncherError> {
