@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::{ Deserialize, Serialize };
 
-use crate::StdError;
+use crate::app::error::StdError;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PlayerProfile {

@@ -7,12 +7,12 @@ use log::{ error, info };
 use serde::{ Deserialize, Serialize };
 use tauri::Window;
 
-use crate::{ StdError, LAUNCHER_DIRECTORY };
+use crate::{ app::error::StdError, constants::LAUNCHER_DIRECTORY };
 
 use self::auth::Authentication;
 
 #[derive(Serialize, Deserialize, Clone)]
-pub(crate) struct LauncherConfig {
+pub struct LauncherConfig {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub(crate) authentication: Option<Authentication>,
 

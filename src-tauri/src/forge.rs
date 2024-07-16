@@ -10,7 +10,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde_json::json;
 
-use crate::{ StdError, TauriError };
+use crate::app::error::{ StdError, TauriError };
 
 pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str, java_path: &Path) -> Result<(PathBuf, String), TauriError> {
   let versions_dir = mc_dir.join("versions");

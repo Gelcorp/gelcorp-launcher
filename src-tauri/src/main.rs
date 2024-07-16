@@ -1,10 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 
+pub mod app;
 pub mod constants;
 
-mod error;
-mod state;
 mod msa_auth;
 mod config;
 mod logger;
@@ -14,259 +13,22 @@ mod game_status;
 mod log_flusher;
 mod forge;
 
-use std::{ fs, io::BufRead, sync::Arc };
-
-use config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig };
-use constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION, UPDATE_ENDPOINTS };
-use error::{ StdError, TauriError };
-use game_status::{ GameStatus, GameStatusState };
-use log::{ debug, error, info, warn };
-use log_flusher::flush_all_logs;
-use minecraft_launcher_core::{
-  bootstrap::{ auth::UserAuthentication, options::{ GameOptionsBuilder, LauncherOptions }, GameBootstrap },
-  json::MCVersion,
-  version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
-};
-use modpack_downloader::ModpackInfo;
-use once_cell::sync::Lazy;
+use app::state::LauncherState;
+use config::LauncherConfig;
+use constants::{ LAUNCHER_DIRECTORY, UPDATE_ENDPOINTS };
+use log::info;
 use serde::Serialize;
-use state::LauncherState;
-use sysinfo::System;
-use tauri::{ utils::config::UpdaterEndpoint, Builder, Manager, State, Window };
+use tauri::utils::config::UpdaterEndpoint;
 
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
-use crate::{
-  java::{ check_java_dir, download_java },
-  log_flusher::{ GAME_LOGS, LAUNCHER_LOGS },
-  logger::{ setup_logger, LauncherAppender },
-  modpack_downloader::{ ModpackDownloader, ModpackProvider },
-};
-
-static GAME_STATUS_STATE: Lazy<GameStatusState> = Lazy::new(GameStatusState::new);
-
-#[tauri::command]
-async fn fetch_modpack_info(state: State<'_, LauncherState>) -> Result<ModpackInfo, TauriError> {
-  let mut downloader = state.modpack_downloader.lock().await;
-  let modpack_info = downloader.get_or_fetch_modpack_info().await?;
-  Ok(modpack_info.clone())
-}
-
-#[tauri::command]
-fn get_system_memory() -> u64 {
-  System::new_all().total_memory()
-}
-
-#[tauri::command]
-async fn start_game(state: State<'_, LauncherState>, window: Window) -> Result<(), TauriError> where Window: Sync {
-  let window = Arc::new(window);
-  let res = real_start_game(state, window.clone()).await.map_err(|e| e.into());
-  flush_all_logs(&window.app_handle());
-  if let Err(err) = &res {
-    error!("Failed to start game: {}", err);
-  }
-  GAME_STATUS_STATE.set(GameStatus::Idle);
-  res
-}
+use crate::{ log_flusher::LAUNCHER_LOGS, logger::{ setup_logger, LauncherAppender }, modpack_downloader::{ ModpackDownloader, ModpackProvider } };
 
 #[derive(Default, Serialize, Clone)]
 pub struct DownloadProgress {
   pub status: String,
   pub current: usize,
   pub total: usize,
-}
-
-async fn real_start_game(state: State<'_, LauncherState>, window: Arc<Window>) -> Result<(), StdError> where Window: Sync {
-  let authentication = {
-    let config = state.launcher_config.lock().await;
-    let authentication = config.authentication.as_ref();
-    if authentication.is_none() {
-      config.broadcast_update(&window)?;
-      return Err("Not logged in!".into());
-    }
-    authentication.unwrap().clone()
-  };
-
-  let reporter: ProgressReporter = {
-    let window = Arc::clone(&window);
-    let progress = std::sync::Mutex::new(None::<DownloadProgress>);
-    Arc::new(
-      CallbackReporter::new(move |event| {
-        let progress = &mut *progress.lock().unwrap();
-        let mut new_progress = progress.clone().unwrap_or_default();
-        let done = matches!(event, Event::Done);
-        match event {
-          Event::Status(status) => {
-            new_progress.status = status;
-          }
-          Event::Progress(current) => {
-            new_progress.current = current;
-          }
-          Event::Total(total) => {
-            new_progress.total = total;
-          }
-          Event::Setup { status, total } => {
-            new_progress = DownloadProgress { status, current: 0, total: total.unwrap_or(0) };
-          }
-          _ => {}
-        }
-        if done {
-          progress.take();
-        } else {
-          progress.replace(new_progress);
-        }
-        let _ = window.emit("update_progress", progress.clone());
-      })
-    )
-  };
-
-  info!("Attempting to launch the game...");
-  let mc_dir = &*LAUNCHER_DIRECTORY;
-  let java_path = mc_dir.join("jre-runtime");
-  let java_executable_path = java_path.join("bin").join("java.exe");
-
-  GAME_STATUS_STATE.set(GameStatus::Downloading);
-  debug!("Checking java runtime...");
-  if !check_java_dir(&java_path) {
-    info!("Java runtime not found. Downloading...");
-    download_java(reporter.clone(), &java_path, "17").await.map_err(|err| TauriError::Other(format!("Failed to download java: {}", err)))?;
-    info!("Java downloaded successfully!");
-  }
-
-  let mut downloader = state.modpack_downloader.lock().await;
-  {
-    debug!("Checking modpack...");
-    let selected_options = state.launcher_config.lock().await.selected_options.clone();
-    downloader.download_and_install(reporter.clone(), selected_options).await?;
-  }
-
-  let ModpackInfo { minecraft_version, forge_version, .. } = downloader.get_or_fetch_modpack_info().await?;
-  let (forge_installer_path, forge_version_name) = forge::check_forge(mc_dir, minecraft_version, forge_version, &java_executable_path).await?;
-  info!("Forge Version: {}", &forge_version_name);
-
-  let auth: UserAuthentication = authentication.try_into()?;
-  info!("Logged in as {}", auth.username);
-
-  let jvm_args = format!(
-    "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
-    state.launcher_config.lock().await.memory_max,
-    mc_dir.join("libraries").display(),
-    forge_installer_path.display(),
-    mc_dir.join(format!("versions/{id}/{id}.jar", id = &forge_version_name)).display()
-  );
-  let jvm_args: Vec<String> = jvm_args
-    .split(' ')
-    .map(|s| s.to_string())
-    .collect();
-
-  let mc_version = MCVersion::from(forge_version_name);
-  let natives_dir = mc_dir.join("natives");
-
-  if fs::remove_dir_all(&natives_dir).is_err() {
-    warn!("Couldn't cleanup natives directory");
-  }
-
-  let game_opts = GameOptionsBuilder::default()
-    .game_dir(mc_dir.clone())
-    .java_path(java_executable_path)
-    .launcher_options(LauncherOptions::new(LAUNCHER_NAME, LAUNCHER_VERSION))
-    .authentication(auth)
-    .jvm_args(jvm_args)
-    .natives_dir(natives_dir)
-    .build()
-    .map_err(|err| TauriError::Other(format!("Failed to create game options: {err}")))?;
-  let env_features = game_opts.env_features();
-
-  reporter.setup("Fetching version manifest", Some(2));
-  let mut version_manager = VersionManager::load(&game_opts.game_dir, &env_features, None).await?;
-
-  info!("Queuing library & version downloads");
-  reporter.status("Resolving local version");
-  reporter.progress(1);
-  let manifest = version_manager.resolve_local_version(&mc_version, true, false).await?;
-  if !manifest.applies_to_current_environment(&env_features) {
-    return Err(format!("Version {} is is incompatible with the current environment", mc_version).into());
-  }
-  reporter.done();
-
-  version_manager.download_required_files(&manifest, &reporter, None, None).await?;
-
-  let mut process = GameBootstrap::new(game_opts)
-    .launch_game(&manifest)
-    .map_err(|err| TauriError::Other(format!("Failed to launch the game: {err}")))?;
-
-  GAME_STATUS_STATE.set(GameStatus::Playing);
-  loop {
-    let mut buf = String::new();
-    if let Ok(length) = process.stdout().read_line(&mut buf) {
-      if length > 0 {
-        println!("{}", &buf.trim_end());
-        GAME_LOGS.log(buf.trim_end());
-        buf.clear();
-      }
-    }
-
-    if !process.stderr().buffer().is_empty() {
-      if let Ok(length) = process.stderr().read_line(&mut buf) {
-        if length > 0 {
-          println!("{}", &buf.trim_end());
-          GAME_LOGS.log(buf.trim_end());
-          buf.clear();
-        }
-      }
-    }
-
-    if let Some(exit_status) = process.exit_status() {
-      if exit_status == 0 {
-        info!("Game exited successfully");
-        break Ok(());
-      } else {
-        info!("Game exited with code {exit_status}");
-        break Err(format!("Failed to launch the game. Process exited with code {exit_status}").into());
-      }
-    }
-  }
-}
-
-#[tauri::command]
-fn get_game_status() -> GameStatus {
-  GAME_STATUS_STATE.get()
-}
-
-#[tauri::command]
-async fn get_launcher_config(state: State<'_, LauncherState>) -> Result<LauncherConfig, TauriError> {
-  Ok(state.launcher_config.lock().await.clone())
-}
-
-#[tauri::command]
-async fn set_launcher_config(state: State<'_, LauncherState>, config: LauncherConfig) -> Result<(), TauriError> {
-  let mut state = state.launcher_config.lock().await;
-  *state = config;
-  state.save_to_file()?;
-  Ok(())
-}
-
-#[tauri::command]
-async fn login_offline(state: State<'_, LauncherState>, window: Window, username: String) -> Result<(), TauriError> {
-  let mut state = state.launcher_config.lock().await;
-  let uuid = Uuid::new_v3(&Uuid::NAMESPACE_DNS, format!("OfflinePlayer:{username}").as_bytes()).to_string();
-  state.authentication.replace(Authentication::Offline { username, uuid });
-  state.broadcast_update(&window)?;
-  state.save_to_file()?;
-  Ok(())
-}
-
-#[tauri::command]
-async fn login_msa(state: State<'_, LauncherState>, window: Window) -> Result<(), TauriError> {
-  let ms_auth_token = msa_auth::get_msa_token(&window).await.map_err(|err| TauriError::Other(format!("Failed to get msa token: {}", err)))?;
-  let auth = MsaMojangAuth::from(ms_auth_token).await.map_err(|err| TauriError::Other(format!("Failed to login: {}", err)))?;
-
-  let mut state = state.launcher_config.lock().await;
-  state.authentication.replace(Authentication::Msa(auth));
-  state.broadcast_update(&window)?;
-  state.save_to_file()?;
-  Ok(())
 }
 
 #[tokio::main]
@@ -293,36 +55,10 @@ async fn main() {
     modpack_downloader: Mutex::new(modpack_downloader),
   };
 
-  let mut context = tauri::generate_context!();
   let update_endpoints = {
     let endpoints = UPDATE_ENDPOINTS.split(' ');
     endpoints.map(|s| UpdaterEndpoint(s.parse().expect("Failed to parse update endpoint"))).collect::<Vec<_>>()
   };
-  context.config_mut().tauri.updater.endpoints.replace(update_endpoints);
 
-  let title = format!("{} {}", LAUNCHER_NAME, LAUNCHER_VERSION);
-
-  Builder::default()
-    .setup(move |app| {
-      let win = app.get_window("main").unwrap();
-      let _ = win.set_title(&title);
-      GAME_STATUS_STATE.set_window(win);
-      Ok(())
-    })
-    .plugin(log_flusher::init())
-    .manage(launcher_state)
-    .invoke_handler(
-      tauri::generate_handler![
-        start_game,
-        get_launcher_config,
-        set_launcher_config,
-        login_offline,
-        login_msa,
-        fetch_modpack_info,
-        get_system_memory,
-        get_game_status
-      ]
-    )
-    .run(context)
-    .expect("error while running tauri application");
+  app::gui::init(launcher_state, update_endpoints);
 }
