@@ -1,11 +1,13 @@
-use std::{ fs, io::BufRead, sync::{ Arc, Mutex } };
+use std::{ fs::{ self, create_dir_all }, io::BufRead, path::PathBuf, sync::{ Arc, Mutex } };
 
 use log::{ debug, info, warn };
 use minecraft_launcher_core::{
   bootstrap::{ auth::UserAuthentication, options::{ GameOptionsBuilder, LauncherOptions }, GameBootstrap },
+  java_manager::JavaRuntimeManager,
   json::MCVersion,
   version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
 };
+use reqwest::Client;
 use tauri::Window;
 
 use crate::{
@@ -68,16 +70,10 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
 
   info!("Attempting to launch the game...");
   let mc_dir = &*LAUNCHER_DIRECTORY;
-  let java_path = mc_dir.join("jre-runtime");
-  let java_executable_path = java_path.join("bin").join("java.exe");
+  let runtimes_dir = mc_dir.join("runtimes");
+  create_dir_all(&runtimes_dir)?;
 
-  game_status.set(GameStatus::Downloading);
-  debug!("Checking java runtime...");
-  if !check_java_dir(&java_path) {
-    info!("Java runtime not found. Downloading...");
-    download_java(reporter.clone(), &java_path, "17").await.map_err(|err| LauncherError::Other(format!("Failed to download java: {}", err)))?;
-    info!("Java downloaded successfully!");
-  }
+  let runtime_manager = JavaRuntimeManager::load(&runtimes_dir, &Client::new()).await?;
 
   let mut downloader = modpack_downloader.lock().await;
   {
@@ -87,54 +83,82 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   }
 
   let ModpackInfo { minecraft_version, forge_version, .. } = downloader.get_or_fetch_modpack_info().await?;
-  let (forge_installer_path, forge_version_name) = forge::check_forge(mc_dir, minecraft_version, forge_version, &java_executable_path).await?;
-  info!("Forge Version: {}", &forge_version_name);
 
   let auth: UserAuthentication = authentication.try_into()?;
   info!("Logged in as {}", auth.username);
 
-  let jvm_args = format!(
-    "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
-    launcher_config.lock().await.memory_max,
-    mc_dir.join("libraries").display(),
-    forge_installer_path.display(),
-    mc_dir.join(format!("versions/{id}/{id}.jar", id = &forge_version_name)).display()
-  );
-  let jvm_args: Vec<String> = jvm_args
-    .split(' ')
-    .map(|s| s.to_string())
-    .collect();
-
-  let mc_version = MCVersion::from(forge_version_name);
   let natives_dir = mc_dir.join("natives");
-
   if fs::remove_dir_all(&natives_dir).is_err() {
     warn!("Couldn't cleanup natives directory");
   }
 
-  let game_opts = GameOptionsBuilder::default()
+  let mut game_opts = GameOptionsBuilder::default()
     .game_dir(mc_dir.clone())
-    .java_path(java_executable_path)
+    .java_path(PathBuf::new()) // Replaced later
     .launcher_options(LauncherOptions::new(LAUNCHER_NAME, LAUNCHER_VERSION))
     .authentication(auth)
-    .jvm_args(jvm_args)
     .natives_dir(natives_dir)
     .build()
     .map_err(|err| LauncherError::Other(format!("Failed to create game options: {err}")))?;
   let env_features = game_opts.env_features();
 
   reporter.setup("Fetching version manifest", Some(2));
-  let mut version_manager = VersionManager::load(&game_opts.game_dir, &env_features, None).await?;
-
-  info!("Queuing library & version downloads");
+  let mut version_manager = VersionManager::load(mc_dir, &env_features, None).await?;
+  let manifest = version_manager.resolve_local_version(&MCVersion::new(minecraft_version), true, false).await?;
   reporter.status("Resolving local version");
   reporter.progress(1);
-  let manifest = version_manager.resolve_local_version(&mc_version, true, false).await?;
+  info!("Queuing library & version downloads");
   if !manifest.applies_to_current_environment(&env_features) {
-    return Err(format!("Version {} is is incompatible with the current environment", mc_version).into());
+    return Err(format!("Version {} is is incompatible with the current environment", &minecraft_version).into());
   }
   reporter.done();
 
+  debug!("Checking java runtime...");
+  let objects_dir = mc_dir.join("assets").join("objects");
+  if let Some(info) = &manifest.java_version {
+    let java_component = &info.component;
+    // TODO: also check platform
+    if !runtime_manager.get_installed_runtimes()?.contains(java_component) {
+      info!("Java runtime not found. Downloading...");
+      runtime_manager.install_runtime(&objects_dir, java_component, &reporter).await?;
+      info!("Java downloaded successfully!");
+    }
+    game_opts.java_path = runtime_manager.get_java_executable(java_component);
+  } else {
+    let runtime_dir = runtime_manager.get_runtime_dir("modpack-runtime");
+    game_status.set(GameStatus::Downloading);
+    debug!("Checking java runtime...");
+    if !check_java_dir(&runtime_dir) {
+      info!("Java runtime not found. Downloading...");
+      download_java(reporter.clone(), &runtime_dir, "17").await.map_err(|err| LauncherError::Other(format!("Failed to download java: {}", err)))?;
+      info!("Java downloaded successfully!");
+    }
+    game_opts.java_path = runtime_manager.get_java_executable("modpack-runtime");
+  }
+
+  let (forge_installer_path, forge_version_name) = forge::check_forge(
+    mc_dir,
+    &minecraft_version.to_string(),
+    forge_version,
+    &game_opts.java_path
+  ).await?;
+  info!("Forge Version: {}", &forge_version_name);
+  let mc_version = MCVersion::new(&forge_version_name);
+
+  let jvm_args = format!(
+    "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
+    launcher_config.lock().await.memory_max,
+    mc_dir.join("libraries").display(),
+    forge_installer_path.display(),
+    mc_dir.join(format!("versions/{0}/{0}.jar", &forge_version_name)).display()
+  );
+  game_opts.jvm_args.replace(jvm_args.split(' ').map(String::from).collect());
+
+  let manifest = version_manager.resolve_local_version(&mc_version, true, false).await?;
+  if !manifest.applies_to_current_environment(&env_features) {
+    return Err(format!("Version {} is is incompatible with the current environment", &mc_version).into());
+  }
+  reporter.done();
   version_manager.download_required_files(&manifest, &reporter, None, None).await?;
 
   let mut process = GameBootstrap::new(game_opts)
