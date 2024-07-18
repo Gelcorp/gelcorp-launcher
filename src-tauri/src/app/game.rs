@@ -74,7 +74,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   let runtimes_dir = mc_dir.join("runtimes");
   create_dir_all(&runtimes_dir)?;
 
-  let runtime_manager = JavaRuntimeManager::load(&runtimes_dir, &Client::new()).await?;
+  game_status.set(GameStatus::Downloading);
 
   let mut downloader = modpack_downloader.lock().await;
   {
@@ -155,6 +155,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   );
   game_opts.jvm_args.replace(jvm_args.split(' ').map(String::from).collect());
 
+  version_manager.refresh().await?;
   let manifest = version_manager.resolve_local_version(&mc_version, true, false).await?;
   if !manifest.applies_to_current_environment(&env_features) {
     return Err(format!("Version {} is is incompatible with the current environment", &mc_version).into());
