@@ -1,14 +1,15 @@
-use std::{ fs::{ self, create_dir_all }, io::BufRead, path::PathBuf, sync::{ Arc, Mutex } };
+use std::{ fs::{ self, create_dir_all }, path::PathBuf, process::Stdio, sync::{ Arc, Mutex } };
 
 use log::{ debug, info, warn };
 use minecraft_launcher_core::{
-  bootstrap::{ auth::UserAuthentication, options::{ GameOptionsBuilder, LauncherOptions }, GameBootstrap },
+  bootstrap::{ auth::UserAuthentication, options::{ GameOptionsBuilder, LauncherOptions }, process::GameProcessBuilder, GameBootstrap },
   java_manager::JavaRuntimeManager,
   json::MCVersion,
   version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
 };
 use reqwest::Client;
 use tauri::Window;
+use tokio::{ io::{ AsyncBufReadExt, BufReader }, process::Command, select };
 
 use crate::{
   app::{ error::LauncherError, game_status::GameStatus },
@@ -161,38 +162,51 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   reporter.done();
   version_manager.download_required_files(&manifest, &reporter, None, None).await?;
 
-  let mut process = GameBootstrap::new(game_opts)
-    .launch_game(&manifest)
+  let GameProcessBuilder { arguments, java_path, directory } = GameBootstrap::new(game_opts)
+    .prepare_launch(&manifest)
     .map_err(|err| LauncherError::Other(format!("Failed to launch the game: {err}")))?;
 
   game_status.set(GameStatus::Playing);
+
+  let mut process = Command::new(java_path.unwrap())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .current_dir(directory.unwrap())
+    .args(arguments)
+    .spawn()
+    .map_err(|err| LauncherError::Other(format!("Failed to launch the game: {err}")))?;
+  let mut stdout = BufReader::new(process.stdout.take().unwrap());
+  let mut stderr = BufReader::new(process.stderr.take().unwrap());
+
+  let mut stdout_buf = String::new();
+  let mut stderr_buf = String::new();
   loop {
-    let mut buf = String::new();
-    if let Ok(length) = process.stdout().read_line(&mut buf) {
-      if length > 0 {
-        println!("{}", &buf.trim_end());
-        GAME_LOGS.log(buf.trim_end());
-        buf.clear();
-      }
-    }
-
-    if !process.stderr().buffer().is_empty() {
-      if let Ok(length) = process.stderr().read_line(&mut buf) {
+    stdout_buf.clear();
+    stderr_buf.clear();
+    select! {
+      Ok(length) = stdout.read_line(&mut stdout_buf) => {
         if length > 0 {
-          println!("{}", &buf.trim_end());
-          GAME_LOGS.log(buf.trim_end());
-          buf.clear();
+          println!("{}", &stdout_buf.trim_end());
+          GAME_LOGS.log(stdout_buf.trim_end());
+          stdout_buf.clear();
         }
-      }
-    }
-
-    if let Some(exit_status) = process.exit_status() {
-      if exit_status == 0 {
-        info!("Game exited successfully");
-        break Ok(());
-      } else {
-        info!("Game exited with code {exit_status}");
-        break Err(format!("Failed to launch the game. Process exited with code {exit_status}").into());
+      },
+      Ok(length) = stderr.read_line(&mut stderr_buf) => {
+        if length > 0 {
+          println!("{}", &stderr_buf.trim_end());
+          GAME_LOGS.log(stderr_buf.trim_end());
+          stderr_buf.clear();
+        }
+      },
+      exit_status = process.wait() => {
+        let code = exit_status?.code().unwrap_or(-1);
+        if code == 0 {
+          info!("Game exited successfully");
+          break Ok(());
+        } else {
+          info!("Game exited with code {code}");
+          break Err(format!("Failed to launch the game. Process exited with code {code}").into());
+        }
       }
     }
   }
