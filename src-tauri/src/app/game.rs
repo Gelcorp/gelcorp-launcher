@@ -7,13 +7,12 @@ use minecraft_launcher_core::{
   json::MCVersion,
   version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
 };
-use reqwest::Client;
 use tauri::Window;
 use tokio::{ io::{ AsyncBufReadExt, BufReader }, process::Command, select };
 
 use crate::{
   app::{ error::LauncherError, game_status::GameStatus },
-  constants::{ LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION },
+  constants::{ create_launcher_client, LAUNCHER_DIRECTORY, LAUNCHER_NAME, LAUNCHER_VERSION },
   forge,
   java::{ check_java_dir, download_java },
   log_flusher::GAME_LOGS,
@@ -25,6 +24,7 @@ use super::{ error::StdError, state::LauncherState };
 
 pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), StdError> where Window: Sync {
   let LauncherState { launcher_config, modpack_downloader, game_status } = state;
+  let client = create_launcher_client(None);
 
   let authentication = {
     let config = launcher_config.lock().await;
@@ -75,6 +75,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   create_dir_all(&runtimes_dir)?;
 
   game_status.set(GameStatus::Downloading);
+  let runtime_manager = JavaRuntimeManager::load(&runtimes_dir, &client).await?;
 
   let mut downloader = modpack_downloader.lock().await;
   {
@@ -104,7 +105,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   let env_features = game_opts.env_features();
 
   reporter.setup("Fetching version manifest", Some(2));
-  let mut version_manager = VersionManager::load(mc_dir, &env_features, None).await?;
+  let mut version_manager = VersionManager::load(mc_dir, &env_features, Some(client)).await?;
   let manifest = version_manager.resolve_local_version(&MCVersion::new(minecraft_version), true, false).await?;
   reporter.status("Resolving local version");
   reporter.progress(1);
