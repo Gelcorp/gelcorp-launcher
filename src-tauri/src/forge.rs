@@ -1,16 +1,11 @@
-use std::{ fs::{ self, create_dir_all, File }, path::{ Path, PathBuf } };
+use std::{ fs::{ self, create_dir_all }, path::{ Path, PathBuf } };
 
-use forge_downloader::{
-  download_utils::forge::ForgeVersionHandler,
-  forge_client_install::ForgeClientInstall,
-  forge_installer_profile::ForgeVersionInfo,
-};
-use log::{ debug, info };
+use forge_downloader::{ download_utils::forge::ForgeVersionHandler, forge_client_install::ForgeClientInstall };
+use log::info;
 use regex::Regex;
 use reqwest::Client;
-use serde_json::json;
 
-use crate::app::error::{ StdError, LauncherError };
+use crate::app::error::LauncherError;
 
 pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str, java_path: &Path) -> Result<(PathBuf, String), LauncherError> {
   let versions_dir = mc_dir.join("versions");
@@ -50,28 +45,7 @@ pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str
   if !forge_version_path.is_file() {
     info!("Forge not installed! Setting up forge...");
     install_handler.install_forge(mc_dir, |_| true).await?;
-    debug!("Setting up forge wrapper...");
-    setup_forge_wrapper(&forge_version_path)?;
     info!("Forge installed!");
   }
   Ok((installer_path, forge_version_id))
-}
-
-fn setup_forge_wrapper(forge_version_path: &PathBuf) -> Result<(), StdError> {
-  let mut version_info: ForgeVersionInfo = serde_json::from_reader(File::open(forge_version_path)?)?;
-  let wrapper_lib =
-    json!({
-    "downloads": {
-      "artifact": {
-        "sha1": "155ac9f4e5f65288eaacae19025ac4d9da1f0ef2",
-        "size": 34910,
-        "url": "https://github.com/ZekerZhayard/ForgeWrapper/releases/download/1.5.7/ForgeWrapper-1.5.7.jar"
-      }
-    },
-    "name": "io.github.zekerzhayard:ForgeWrapper:1.5.7"
-  });
-  version_info.libraries.push(serde_json::from_value(wrapper_lib)?);
-  version_info.main_class = "io.github.zekerzhayard.forgewrapper.installer.Main".to_string();
-  serde_json::to_writer_pretty(&mut File::create(forge_version_path)?, &version_info)?;
-  Ok(())
 }
