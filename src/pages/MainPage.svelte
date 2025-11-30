@@ -50,7 +50,7 @@
         {buttonLabel}
       </button>
       <section>
-        <p>Bienvenido, <b><img src="https://crafatar.com/avatars/{uuid}?overlay=true?size=64" alt="Avatar del jugador" /> {username}</b></p>
+        <p>Bienvenido, <b><img src="https://minotar.net/helm/{uuid}/64.png" alt="Avatar del jugador" /> {username}</b></p>
         <button on:click={logout}>Cambiar Usuario</button>
       </section>
     </div>
@@ -106,8 +106,10 @@
   }
 
   footer .lower section img {
-    width: 14.5px;
+    width: 16px;
     height: auto;
+    position: relative;
+    top: 1px;
   }
 
   .start-btn {
