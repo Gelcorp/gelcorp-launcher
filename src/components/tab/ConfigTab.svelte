@@ -117,6 +117,7 @@
     height: 100%;
     padding: 20px;
     box-sizing: border-box;
+    overflow-y: auto;
   }
 
   h2 {
