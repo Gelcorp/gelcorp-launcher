@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use log::error;
 use minecraft_launcher_core::bootstrap::auth::UserAuthentication;
 use sysinfo::System;
@@ -5,7 +7,7 @@ use tauri::{ utils::config::UpdaterEndpoint, Builder, Manager, State, Window };
 
 use crate::{
   config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig },
-  constants::{ LAUNCHER_NAME, LAUNCHER_VERSION },
+  constants::{ LAUNCHER_NAME, LAUNCHER_VERSION, G1GC_JRE_FLAGS, ZGC_JRE_FLAGS },
   log_flusher::{ self, flush_all_logs },
   modpack_downloader::ModpackInfo,
 };
@@ -22,6 +24,14 @@ async fn fetch_modpack_info(state: State<'_, LauncherState>) -> Result<ModpackIn
 #[tauri::command]
 fn get_system_memory() -> u64 {
   System::new_all().total_memory()
+}
+
+#[tauri::command]
+fn get_default_jre_flags() -> HashMap<String, String> {
+  let mut flags = HashMap::new();
+  flags.insert("g1gc".to_owned(), G1GC_JRE_FLAGS.to_owned());
+  flags.insert("zgc".to_owned(), ZGC_JRE_FLAGS.to_owned());
+  flags
 }
 
 #[tauri::command]
@@ -94,6 +104,7 @@ pub fn init(launcher_state: LauncherState, update_endpoints: Vec<UpdaterEndpoint
         login_msa,
         fetch_modpack_info,
         get_system_memory,
+        get_default_jre_flags,
         get_game_status
       ]
     )

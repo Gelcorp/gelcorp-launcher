@@ -7,7 +7,7 @@ use log::{ error, info };
 use serde::{ Deserialize, Serialize };
 use tauri::Window;
 
-use crate::{ app::error::StdError, constants::LAUNCHER_DIRECTORY };
+use crate::{ app::error::StdError, constants::{ G1GC_JRE_FLAGS, LAUNCHER_DIRECTORY } };
 
 use self::auth::Authentication;
 
@@ -23,6 +23,9 @@ pub struct LauncherConfig {
 
   #[serde(default = "LauncherConfig::default_memory_max")]
   pub(crate) memory_max: u16,
+
+  #[serde(default = "LauncherConfig::default_jre_flags")]
+  pub(crate) jre_flags: String,
 }
 
 impl Default for LauncherConfig {
@@ -32,6 +35,7 @@ impl Default for LauncherConfig {
       selected_options: vec![],
       providers: LauncherConfig::default_providers(),
       memory_max: LauncherConfig::default_memory_max(),
+      jre_flags: LauncherConfig::default_jre_flags(),
     }
   }
 }
@@ -80,6 +84,10 @@ impl LauncherConfig {
 
   fn default_memory_max() -> u16 {
     1536
+  }
+
+  fn default_jre_flags() -> String {
+    G1GC_JRE_FLAGS.to_owned()
   }
 
   fn default_providers() -> Vec<String> {

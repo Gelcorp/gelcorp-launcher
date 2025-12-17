@@ -17,6 +17,7 @@ export type LauncherConfig = {
   authentication?: OfflineAuthentication | MsaAuthentication;
   memory_max: number;
   selected_options?: string[];
+  jre_flags?: string;
 };
 
 /**

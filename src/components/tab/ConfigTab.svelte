@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { totalMemoryStore } from "$/ipc/stores/system_info";
+  import { totalMemoryStore, defaultJREFlags } from "$/ipc/stores/system_info";
   import { launcherConfigStore } from "$/ipc/stores/launcher_config";
   import { modpackInfoStore, type Optional } from "$/ipc/stores/modpack_info";
   import { gameStatusStore, GameStatus } from "$/ipc/stores/game_status";
@@ -39,6 +39,13 @@
     });
   };
 
+  $: setFlags = (flagPreset: string) => {
+    launcherConfigStore.update((config) => {
+      config.jre_flags = $defaultJREFlags[flagPreset];
+      return config;
+    });
+  };
+
   $: getIncompatibilities = (id: string) => {
     return incompatibilities[id] ?? [];
   };
@@ -64,6 +71,17 @@
         <p>Cargando...</p>
       {/if}
     </label>
+    <label for="jre_flags">
+      Argumentos de Java:
+      <div class="jre-flags">
+        <input type="text" bind:value={$launcherConfigStore.jre_flags} name="jre_flags" id="jre_flags" spellcheck="false" disabled={gameRunning} />
+        <button on:click={() => setFlags("g1gc")} disabled={gameRunning}>G1GC</button>
+        <button on:click={() => setFlags("zgc")} disabled={gameRunning}>ZGC</button>
+      </div>
+    </label>
+    {#if $launcherConfigStore.jre_flags === $defaultJREFlags.zgc}
+      <p style:color="rgb(255, 45, 45)"><b>Experimental!</b> Usar ZGC sólo si tenés un procesador bueno y usas más de 12gb de RAM</p>
+    {/if}
   </section>
   <h2>Mods Opcionales:</h2>
   <section class="opt-container">
@@ -122,6 +140,19 @@
 
   h2 {
     margin-bottom: 20px;
+  }
+
+  .jre-flags {
+    display: flex;
+    flex: 1;
+  }
+
+  .jre-flags input {
+    width: 100%;
+  }
+
+  .jre-flags * {
+    outline: none;
   }
 
   .opt-container {

@@ -147,13 +147,16 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   info!("Forge Version: {}", &forge_version_name);
   let mc_version = MCVersion::new(&forge_version_name);
 
+  let guard = launcher_config.lock().await;
   let jvm_args = format!(
-    "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M",
-    launcher_config.lock().await.memory_max,
+    "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} {}",
+    guard.memory_max,
     mc_dir.join("libraries").display(),
     forge_installer_path.display(),
-    mc_dir.join(format!("versions/{0}/{0}.jar", &forge_version_name)).display()
+    mc_dir.join(format!("versions/{0}/{0}.jar", &forge_version_name)).display(),
+    guard.jre_flags
   );
+  drop(guard);
   game_opts.jvm_args.replace(jvm_args.split(' ').map(String::from).collect());
 
   version_manager.refresh().await?;
