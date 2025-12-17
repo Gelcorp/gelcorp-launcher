@@ -67,5 +67,6 @@
     padding: 0;
     /* text-wrap: wrap; */
     width: 100%;
+    white-space: pre;
   }
 </style>
