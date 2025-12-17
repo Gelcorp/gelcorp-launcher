@@ -8,7 +8,7 @@ use minecraft_launcher_core::{
   version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
 };
 use tauri::Window;
-use tokio::{ io::{ AsyncBufReadExt, BufReader }, process::Command, select };
+use tokio::{ io::{ AsyncBufReadExt, BufReader }, process::Command };
 
 use crate::{
   app::{ error::LauncherError, game_status::GameStatus },
@@ -177,39 +177,31 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
     .args(arguments)
     .spawn()
     .map_err(|err| LauncherError::Other(format!("Failed to launch the game: {err}")))?;
-  let mut stdout = BufReader::new(process.stdout.take().unwrap());
-  let mut stderr = BufReader::new(process.stderr.take().unwrap());
+  let mut stdout = BufReader::new(process.stdout.take().unwrap()).lines();
+  let mut stderr = BufReader::new(process.stderr.take().unwrap()).lines();
 
-  let mut stdout_buf = String::new();
-  let mut stderr_buf = String::new();
-  loop {
-    stdout_buf.clear();
-    stderr_buf.clear();
-    select! {
-      Ok(length) = stdout.read_line(&mut stdout_buf) => {
-        if length > 0 {
-          println!("{}", &stdout_buf.trim_end());
-          GAME_LOGS.log(stdout_buf.trim_end());
-          stdout_buf.clear();
-        }
-      },
-      Ok(length) = stderr.read_line(&mut stderr_buf) => {
-        if length > 0 {
-          println!("{}", &stderr_buf.trim_end());
-          GAME_LOGS.log(stderr_buf.trim_end());
-          stderr_buf.clear();
-        }
-      },
-      exit_status = process.wait() => {
-        let code = exit_status?.code().unwrap_or(-1);
-        if code == 0 {
-          info!("Game exited successfully");
-          break Ok(());
-        } else {
-          info!("Game exited with code {code}");
-          break Err(format!("Failed to launch the game. Process exited with code {code}").into());
-        }
-      }
+  tokio::spawn(async move {
+    while let Ok(Some(line)) = stdout.next_line().await {
+      println!("{}", &line.trim_end());
+      GAME_LOGS.log(line.trim_end());
     }
+  });
+
+  tokio::spawn(async move {
+    while let Ok(Some(line)) = stderr.next_line().await {
+      println!("{}", &line.trim_end());
+      GAME_LOGS.log(line.trim_end());
+    }
+  });
+
+  let exit_status = process.wait().await;
+
+  let code = exit_status?.code().unwrap_or(-1);
+  if code == 0 {
+    info!("Game exited successfully");
+    Ok(())
+  } else {
+    info!("Game exited with code {code}");
+    Err(format!("Failed to launch the game. Process exited with code {code}").into())
   }
 }
