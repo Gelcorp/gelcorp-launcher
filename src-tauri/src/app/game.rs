@@ -186,6 +186,9 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
 
   tokio::spawn(async move {
     while let Ok(Some(line)) = stdout.next_line().await {
+      if line == "false" {
+        continue; // TODO: find out why this happens
+      }
       println!("{}", &line.trim_end());
       GAME_LOGS.log(line.trim_end());
     }
