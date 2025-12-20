@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { Log } from "$/ipc/stores/loggers";
 
-  export let logs: string[];
+  export let logs: Log[];
 
   let consoleElement: HTMLElement;
   function scrollConsole() {
@@ -37,8 +38,8 @@
   role="textbox"
   tabindex="0"
 >
-  {#each logs as log}
-    <p>{log}</p>
+  {#each logs as { message, level }}
+    <span class={level}>{message}</span>
   {/each}
 </section>
 
@@ -62,11 +63,25 @@
     box-sizing: border-box;
   }
 
-  .logs p {
+  .logs span {
+    display: block;
     margin: 0;
     padding: 0;
     /* text-wrap: wrap; */
     width: 100%;
     white-space: pre;
+  }
+
+  .logs span.warn,
+  .logs span.debug {
+    color: #ffa500;
+  }
+
+  .logs span.error {
+    color: #ff0000;
+  }
+
+  .logs span.fatal {
+    color: #8b0000;
   }
 </style>

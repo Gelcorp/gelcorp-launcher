@@ -2,6 +2,8 @@ import { writable } from "svelte/store";
 import { invoke } from "@tauri-apps/api";
 import { listen } from "@tauri-apps/api/event";
 
+export type Log = { level: string; message: string };
+
 /**
  *
  * @param listenerName Name of the tauri event to listen to
@@ -9,10 +11,10 @@ import { listen } from "@tauri-apps/api/event";
  * @returns A svelte store with the logs
  */
 function createLogsStore(id: string) {
-  let { subscribe, set, update } = writable<string[]>([], (set) => {
+  let { subscribe, set, update } = writable<Log[]>([], (set) => {
     // Get logs from cache
     invoke("plugin:log-flusher|get_logs", { id }).then((logs) => {
-      set(logs as string[]);
+      log(...(logs as string[]));
     });
 
     // Listen for logs
@@ -25,9 +27,17 @@ function createLogsStore(id: string) {
     return () => unsubscriber.then((unlisten) => unlisten());
   });
 
+  function toLog(lastLevel: string | undefined, message: string) {
+    const matches = /[\/\w]([A-Z]+)\]/g.exec(message) ?? [];
+    const level = matches.length > 1 ? matches[1].toLowerCase() : lastLevel ?? "info";
+    return { level, message } as Log;
+  }
+
   function log(...logs: string[]) {
     update((arr) => {
-      arr = [...arr, ...logs];
+      for (const log of logs) {
+        arr.push(toLog(arr[arr.length - 1]?.level, log));
+      }
       while (arr.length >= 1001) {
         arr.shift();
       }
