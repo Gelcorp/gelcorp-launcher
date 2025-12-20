@@ -21,21 +21,21 @@ dotenv-build = "0.1.1"
 
 [dependencies]
 tauri = { version = "1.6.8", features = ["updater"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
 regex = "1.10.2"
 uuid = { version = "1.6.1", features = [
   "v3",
   "serde",
 ], default-features = false }
-reqwest = { version = "0.12.5", features = ["stream"] }
+reqwest = { version = "0.12.26", features = ["stream"] }
 sha1 = "0.10.6"
 hex = { version = "0.4.3", features = ["serde"] }
-tokio = { version = "1.34.0", features = ["full"] }
+tokio = { version = "1.48.0", features = ["full"] }
 minecraft-msa-auth = "0.4.0"
 oauth2 = "4.4.2"
-chrono = { version = "0.4.31", features = ["serde"] }
-futures = "0.3.30"
+chrono = { version = "0.4.42", features = ["serde"] }
+futures = "0.3.31"
 thiserror = "1.0.50"
 derive_builder = "0.12.0"
 zip = "0.6.6"
@@ -46,10 +46,10 @@ gelcorp-modpack = { git = "https://github.com/Gelcorp/gelcorp-modpack.git", defa
   "install",
 ] }
 log4rs = { version = "1.2.0", features = ["gzip"] }
-log = "0.4.20"
-anyhow = "1.0.79"
-once_cell = "1.19.0"
-rsa = { version = "0.9.6", features = ["sha2"] }
+log = "0.4.29"
+anyhow = "1.0.100"
+once_cell = "1.21.3"
+rsa = { version = "0.9.9", features = ["sha2"] }
 cbc = "0.1.2"
 aes = "0.8.3"
 sysinfo = "0.30.5"
