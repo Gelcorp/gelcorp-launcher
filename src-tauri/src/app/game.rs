@@ -149,8 +149,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
 
   let guard = launcher_config.lock().await;
   let jvm_args = format!(
-    "-Xms{}M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} {}",
-    guard.memory_max,
+    "-Xms512M -Xmx{}M -Dforgewrapper.librariesDir={} -Dforgewrapper.installer={} -Dforgewrapper.minecraft={} {}",
     guard.memory_max,
     mc_dir.join("libraries").display(),
     forge_installer_path.display(),
