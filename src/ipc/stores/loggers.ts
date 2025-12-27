@@ -10,7 +10,7 @@ export type Log = { level: string; message: string };
  * @param commandName Name of the tauri command to invoke the first time
  * @returns A svelte store with the logs
  */
-function createLogsStore(id: string) {
+function createLogsStore(id: string, pattern: RegExp) {
   let { subscribe, set, update } = writable<Log[]>([], (set) => {
     // Get logs from cache
     invoke("plugin:log-flusher|get_logs", { id }).then((logs) => {
@@ -28,7 +28,7 @@ function createLogsStore(id: string) {
   });
 
   function toLog(lastLevel: string | undefined, message: string) {
-    const matches = /[\/\w]([A-Z]+)\]/g.exec(message) ?? [];
+    const matches = pattern.exec(message) ?? [];
     const level = matches.length > 1 ? matches[1].toLowerCase() : lastLevel ?? "info";
     return { level, message } as Log;
   }
@@ -50,5 +50,5 @@ function createLogsStore(id: string) {
   return { subscribe, log, clear };
 }
 
-export const gameLogsStore = createLogsStore("game_logs");
-export const launcherLogsStore = createLogsStore("launcher_logs");
+export const gameLogsStore = createLogsStore("game_logs", /^\[(?:[0-9:]+)\] \[[^/]+\/([^\]]+)\]/m);
+export const launcherLogsStore = createLogsStore("launcher_logs", /^\[(?:[0-9:]+) ([^\]]+)\]:/m);
