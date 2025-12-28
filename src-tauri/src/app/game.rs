@@ -1,5 +1,6 @@
 use std::{ fs::{ self, create_dir_all }, path::PathBuf, process::Stdio, sync::{ Arc, Mutex } };
 
+use futures::channel::oneshot;
 use log::{ debug, info, warn };
 use minecraft_launcher_core::{
   bootstrap::{ auth::UserAuthentication, options::{ GameOptionsBuilder, LauncherOptions }, process::GameProcessBuilder, GameBootstrap },
@@ -8,7 +9,7 @@ use minecraft_launcher_core::{
   version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
 };
 use tauri::Window;
-use tokio::{ io::{ AsyncBufReadExt, BufReader }, process::Command };
+use tokio::{ io::{ AsyncBufReadExt, AsyncRead, BufReader }, process::Command };
 
 use crate::{
   app::{ error::LauncherError, game_status::GameStatus },
@@ -181,27 +182,35 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
     .args(arguments)
     .spawn()
     .map_err(|err| LauncherError::Other(format!("Failed to launch the game: {err}")))?;
-  let mut stdout = BufReader::new(process.stdout.take().unwrap()).lines();
-  let mut stderr = BufReader::new(process.stderr.take().unwrap()).lines();
+  let stdout = BufReader::new(process.stdout.take().unwrap());
+  let stderr = BufReader::new(process.stderr.take().unwrap());
 
-  tokio::spawn(async move {
-    while let Ok(Some(line)) = stdout.next_line().await {
-      if line == "false" {
-        continue; // TODO: find out why this happens
+  fn log_lines(reader: BufReader<impl AsyncRead + Unpin + Send + 'static>) -> oneshot::Sender<()> {
+    let (tx, mut rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+      let mut lines = reader.lines();
+
+      while let Ok(None) = rx.try_recv() {
+        if let Ok(Some(line)) = lines.next_line().await {
+          if line == "false" {
+            continue; // TODO: find out why this happens
+          }
+          println!("{}", &line.trim_end());
+          GAME_LOGS.log(line.trim_end());
+        }
       }
-      println!("{}", &line.trim_end());
-      GAME_LOGS.log(line.trim_end());
-    }
-  });
+    });
+    tx
+  }
 
-  tokio::spawn(async move {
-    while let Ok(Some(line)) = stderr.next_line().await {
-      println!("{}", &line.trim_end());
-      GAME_LOGS.log(line.trim_end());
-    }
-  });
+  let cancel_stdout = log_lines(stdout);
+  let cancel_stderr = log_lines(stderr);
 
   let exit_status = process.wait().await;
+
+  let _ = cancel_stdout.send(());
+  let _ = cancel_stderr.send(());
 
   let code = exit_status?.code().unwrap_or(-1);
   if code == 0 {
