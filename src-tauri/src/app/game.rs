@@ -1,7 +1,7 @@
 use std::{ fs::{ self, create_dir_all }, path::PathBuf, process::Stdio, sync::{ Arc, Mutex } };
 
 use futures::channel::oneshot;
-use log::{ debug, info, warn };
+use log::{ debug, error, info, warn };
 use minecraft_launcher_core::{
   bootstrap::{ auth::UserAuthentication, options::{ GameOptionsBuilder, LauncherOptions }, process::GameProcessBuilder, GameBootstrap },
   java_manager::JavaRuntimeManager,
@@ -192,12 +192,15 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
       let mut lines = reader.lines();
 
       while let Ok(None) = rx.try_recv() {
-        if let Ok(Some(line)) = lines.next_line().await {
-          if line == "false" {
-            continue; // TODO: find out why this happens
+        match lines.next_line().await {
+          // TODO: find out why this happens
+          Ok(Some(line)) if line != "false" => {
+            let line = line.trim_end();
+            println!("{}", &line);
+            GAME_LOGS.log(line);
           }
-          println!("{}", &line.trim_end());
-          GAME_LOGS.log(line.trim_end());
+          Err(err) => error!("Failed to read game output: {}", err),
+          _ => (),
         }
       }
     });
