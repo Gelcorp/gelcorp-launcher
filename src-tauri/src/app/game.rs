@@ -185,22 +185,24 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   let stdout = BufReader::new(process.stdout.take().unwrap());
   let stderr = BufReader::new(process.stderr.take().unwrap());
 
-  fn log_lines(reader: BufReader<impl AsyncRead + Unpin + Send + 'static>) -> oneshot::Sender<()> {
+  fn log_lines(mut reader: BufReader<impl AsyncRead + Unpin + Send + 'static>) -> oneshot::Sender<()> {
     let (tx, mut rx) = oneshot::channel();
 
     tokio::spawn(async move {
-      let mut lines = reader.lines();
-
       while let Ok(None) = rx.try_recv() {
-        match lines.next_line().await {
-          // TODO: find out why this happens
-          Ok(Some(line)) if line != "false" => {
-            let line = line.trim_end();
-            println!("{}", &line);
-            GAME_LOGS.log(line);
+        let mut buf = Vec::new();
+        match reader.read_until(b'\n', &mut buf).await {
+          Ok(0) => (),
+          Ok(_) => {
+            let line = String::from_utf8(buf).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+            if line == "false" {
+              continue; // TODO: find out why this happens
+            }
+
+            println!("{}", line.trim_end());
+            GAME_LOGS.log(line.trim_end());
           }
           Err(err) => error!("Failed to read game output: {}", err),
-          _ => (),
         }
       }
     });
