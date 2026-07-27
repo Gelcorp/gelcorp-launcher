@@ -11,8 +11,8 @@ pub const UPDATE_ENDPOINTS: &str = env!("UPDATE_ENDPOINTS");
 pub const MSA_CLIENT_ID: &str = env!("MSA_CLIENT_ID");
 
 pub const G1GC_JRE_FLAGS: &str =
-  "-XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M";
-pub const ZGC_JRE_FLAGS: &str = "-XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch -XX:+PerfDisableSharedMem -XX:+UseDynamicNumberOfGCThreads";
+  "-XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M -XX:+UseStringDeduplication";
+pub const ZGC_JRE_FLAGS: &str = "-XX:+UseZGC -XX:+ZGenerational -XX:+UseStringDeduplication";
 
 // OAuth Constants
 pub const REDIRECT_URL: &str = "https://login.live.com/oauth20_desktop.srf";
