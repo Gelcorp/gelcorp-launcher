@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use log::error;
 use minecraft_launcher_core::bootstrap::auth::UserAuthentication;
 use sysinfo::System;
-use tauri::{ utils::config::UpdaterEndpoint, Builder, Manager, State, Window };
+use tauri::{ Builder, Manager, State, Url, WebviewWindow };
 
 use crate::{
   config::{ auth::{ Authentication, MsaMojangAuth }, LauncherConfig },
@@ -35,9 +35,9 @@ fn get_default_jre_flags() -> HashMap<String, String> {
 }
 
 #[tauri::command]
-async fn start_game(state: State<'_, LauncherState>, window: Window) -> Result<(), LauncherError> where Window: Sync {
+async fn start_game(state: State<'_, LauncherState>, window: WebviewWindow) -> Result<(), LauncherError> where WebviewWindow: Sync {
   let res = game::launch_game(&state, &window).await.map_err(|e| e.into());
-  flush_all_logs(&window.app_handle());
+  flush_all_logs(window.app_handle());
   if let Err(err) = &res {
     error!("Failed to start game: {}", err);
   }
@@ -64,7 +64,7 @@ async fn set_launcher_config(state: State<'_, LauncherState>, config: LauncherCo
 }
 
 #[tauri::command]
-async fn login_offline(state: State<'_, LauncherState>, window: Window, username: String) -> Result<(), LauncherError> {
+async fn login_offline(state: State<'_, LauncherState>, window: WebviewWindow, username: String) -> Result<(), LauncherError> {
   let mut state = state.launcher_config.lock().await;
   let auth = UserAuthentication::offline(&username);
   state.authentication.replace(Authentication::Offline { username, uuid: auth.uuid });
@@ -74,7 +74,7 @@ async fn login_offline(state: State<'_, LauncherState>, window: Window, username
 }
 
 #[tauri::command]
-async fn login_msa(state: State<'_, LauncherState>, window: Window) -> Result<(), LauncherError> {
+async fn login_msa(state: State<'_, LauncherState>, window: WebviewWindow) -> Result<(), LauncherError> {
   let ms_auth_token = msa_auth
     ::show_microsoft_prompt(&window).await
     .map_err(|err| LauncherError::Other(format!("Failed to get msa token: {}", err)))?;
@@ -87,14 +87,29 @@ async fn login_msa(state: State<'_, LauncherState>, window: Window) -> Result<()
   Ok(())
 }
 
-pub fn init(launcher_state: LauncherState, update_endpoints: Vec<UpdaterEndpoint>) {
+pub async fn init(launcher_state: LauncherState, update_endpoints: Vec<Url>) -> anyhow::Result<()> {
   let title = format!("{} {}", LAUNCHER_NAME, LAUNCHER_VERSION);
 
   let mut context = tauri::generate_context!();
-  context.config_mut().tauri.updater.endpoints.replace(update_endpoints);
+  let endpoints = context
+    .config_mut()
+    .plugins.0.get_mut("updater")
+    .and_then(|config| config.get_mut("endpoints"))
+    .unwrap();
+  *endpoints = serde_json::to_value(update_endpoints)?;
 
   let app = Builder::default()
     .plugin(log_flusher::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
+    .setup(move |app| {
+      let main_win = app.get_webview_window("main").expect("failed to get main window");
+      let _ = main_win.set_title(&title);
+
+      launcher_state.game_status.set_window(main_win);
+      app.manage(launcher_state);
+
+      Ok(())
+    })
     .invoke_handler(
       tauri::generate_handler![
         start_game,
@@ -111,10 +126,7 @@ pub fn init(launcher_state: LauncherState, update_endpoints: Vec<UpdaterEndpoint
     .build(context)
     .expect("error while building tauri application");
 
-  let main_win = app.get_window("main").expect("failed to get main window");
-  let _ = main_win.set_title(&title);
+  app.run(|_, _| {});
 
-  launcher_state.game_status.set_window(main_win);
-  app.manage(launcher_state);
-  app.run(|_, _| {})
+  Ok(())
 }

@@ -5,7 +5,7 @@ use std::{ fs::{ create_dir_all, File }, path::PathBuf };
 
 use log::{ error, info };
 use serde::{ Deserialize, Serialize };
-use tauri::Window;
+use tauri::{ Emitter, WebviewWindow };
 
 use crate::{ app::error::StdError, constants::{ G1GC_JRE_FLAGS, LAUNCHER_DIRECTORY } };
 
@@ -77,7 +77,7 @@ impl LauncherConfig {
     Ok(())
   }
 
-  pub(crate) fn broadcast_update(&self, window: &Window) -> Result<(), StdError> {
+  pub(crate) fn broadcast_update(&self, window: &WebviewWindow) -> Result<(), StdError> {
     window.emit("launcher_config_update", &self)?;
     Ok(())
   }

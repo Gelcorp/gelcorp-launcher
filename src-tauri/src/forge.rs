@@ -33,7 +33,7 @@ pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str
       create_dir_all(parent)?;
     }
 
-    let bytes = Client::new().get(&version_info.get_installer_url()).send().await?.error_for_status()?.bytes().await?;
+    let bytes = Client::new().get(version_info.get_installer_url()).send().await?.error_for_status()?.bytes().await?;
     fs::write(&installer_path, &bytes)?;
   }
 
@@ -41,7 +41,7 @@ pub async fn check_forge(mc_dir: &PathBuf, mc_version: &str, forge_version: &str
   let mut install_handler = ForgeClientInstall::new(installer_path.clone(), java_path.to_path_buf())?;
   let forge_version_id = install_handler.get_profile().get_version_id();
 
-  let forge_version_path = mc_dir.join(format!("versions/{id}/{id}.json", id = &forge_version_id));
+  let forge_version_path = mc_dir.join(format!("versions/{id}/{id}.json", id = forge_version_id));
   if !forge_version_path.is_file() {
     info!("Forge not installed! Setting up forge...");
     install_handler.install_forge(mc_dir, |_| true).await?;

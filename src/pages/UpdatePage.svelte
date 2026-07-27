@@ -1,10 +1,10 @@
 <script lang="ts">
   import AlertBoxLayout from "$/components/AlertBoxLayout.svelte";
   import ProgressBar from "$/components/ProgressBar.svelte";
-  import { installUpdate, type UpdateManifest } from "@tauri-apps/api/updater";
+  import { Update } from "@tauri-apps/plugin-updater";
   import { createEventDispatcher } from "svelte";
 
-  export let manifest: UpdateManifest | undefined;
+  export let update: Update;
 
   const dispatch = createEventDispatcher();
 
@@ -14,7 +14,7 @@
   async function install() {
     try {
       installing = true;
-      await installUpdate();
+      await update?.install();
     } catch (e) {
       console.error(e);
       error = String(e);
@@ -33,12 +33,12 @@
     <header>
       <img src="gelcorp-title.webp" alt="Logo de Gelcorp" />
       <h2>Actualización disponible</h2>
-      <p>Es necesario actualizar a la versión <b>{manifest?.version}</b> para continuar</p>
+      <p>Es necesario actualizar a la versión <b>{update?.version}</b> para continuar</p>
     </header>
     <section>
       <b>Notas de actualización:</b>
       <code>
-        {manifest?.body}
+        {update?.body}
       </code>
     </section>
     <footer>

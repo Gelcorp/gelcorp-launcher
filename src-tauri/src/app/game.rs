@@ -8,7 +8,7 @@ use minecraft_launcher_core::{
   json::MCVersion,
   version_manager::{ downloader::progress::{ CallbackReporter, Event, ProgressReporter }, VersionManager },
 };
-use tauri::Window;
+use tauri::{ Emitter, WebviewWindow };
 use tokio::{ io::{ AsyncBufReadExt, AsyncRead, BufReader }, process::Command };
 
 use crate::{
@@ -23,7 +23,7 @@ use crate::{
 
 use super::{ error::StdError, state::LauncherState };
 
-pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), StdError> where Window: Sync {
+pub async fn launch_game(state: &LauncherState, window: &WebviewWindow) -> Result<(), StdError> where WebviewWindow: Sync {
   let LauncherState { launcher_config, modpack_downloader, game_status } = state;
   let client = create_launcher_client(None);
 
@@ -112,7 +112,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   reporter.progress(1);
   info!("Queuing library & version downloads");
   if !manifest.applies_to_current_environment(&env_features) {
-    return Err(format!("Version {} is is incompatible with the current environment", &minecraft_version).into());
+    return Err(format!("Version {} is is incompatible with the current environment", minecraft_version).into());
   }
   reporter.done();
 
@@ -145,7 +145,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
     forge_version,
     &game_opts.java_path
   ).await?;
-  info!("Forge Version: {}", &forge_version_name);
+  info!("Forge Version: {}", forge_version_name);
   let mc_version = MCVersion::new(&forge_version_name);
 
   let guard = launcher_config.lock().await;
@@ -155,7 +155,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
     guard.memory_max,
     mc_dir.join("libraries").display(),
     forge_installer_path.display(),
-    mc_dir.join(format!("versions/{0}/{0}.jar", &forge_version_name)).display(),
+    mc_dir.join(format!("versions/{0}/{0}.jar", forge_version_name)).display(),
     guard.jre_flags
   );
   drop(guard);
@@ -164,7 +164,7 @@ pub async fn launch_game(state: &LauncherState, window: &Window) -> Result<(), S
   version_manager.refresh().await?;
   let manifest = version_manager.resolve_local_version(&mc_version, true, false).await?;
   if !manifest.applies_to_current_environment(&env_features) {
-    return Err(format!("Version {} is is incompatible with the current environment", &mc_version).into());
+    return Err(format!("Version {} is is incompatible with the current environment", mc_version).into());
   }
   reporter.done();
   version_manager.download_required_files(&manifest, &reporter, None, None).await?;

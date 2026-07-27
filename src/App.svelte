@@ -5,18 +5,18 @@
   import AlertBoxLayout from "$/components/AlertBoxLayout.svelte";
 
   import { launcherConfigStore } from "$/ipc/stores/launcher_config";
-  import { checkUpdate } from "@tauri-apps/api/updater";
+  import { check } from "@tauri-apps/plugin-updater";
 
   $: authenticated = $launcherConfigStore?.authentication !== undefined;
 
   let showUpdateScreen = true;
   let update = new Promise(async (resolve) => {
     try {
-      let update = await checkUpdate();
+      let update = await check();
       resolve(update);
     } catch (err) {
       console.error(`Error checking for updates: ${err}`);
-      resolve({ shouldUpdate: false });
+      resolve(null);
     }
   });
 </script>
@@ -25,9 +25,9 @@
   <AlertBoxLayout>
     <h4>Buscando actualizaciones...</h4>
   </AlertBoxLayout>
-{:then { manifest, shouldUpdate }}
-  {#if showUpdateScreen && shouldUpdate}
-    <UpdatePage on:close={() => (showUpdateScreen = false)} {manifest} />
+{:then update}
+  {#if showUpdateScreen && update !== null}
+    <UpdatePage on:close={() => (showUpdateScreen = false)} {update} />
   {:else if authenticated}
     <MainPage />
   {:else}

@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::Window;
+use tauri::{ Emitter, WebviewWindow };
 
 #[derive(Serialize, Clone, Default)]
 pub enum GameStatus {
@@ -13,7 +13,7 @@ pub enum GameStatus {
 #[derive(Default)]
 pub struct GameStatusState {
   status: Mutex<GameStatus>,
-  window: Mutex<Option<Window>>,
+  window: Mutex<Option<WebviewWindow>>,
 }
 
 impl GameStatusState {
@@ -21,7 +21,7 @@ impl GameStatusState {
     Self::default()
   }
 
-  pub fn set_window(&self, window: Window) {
+  pub fn set_window(&self, window: WebviewWindow) {
     self.window.lock().unwrap().replace(window);
   }
 

@@ -20,14 +20,14 @@ use oauth2::{
 };
 use reqwest::Url;
 use serde::{ Deserialize, Serialize };
-use tauri::{ Manager, Window, WindowBuilder, WindowEvent, WindowUrl };
+use tauri::{ Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent };
 use thiserror::Error;
 
 use crate::constants::{ AUTHORIZE_URL, MSA_CLIENT_ID, REDIRECT_URL, TOKEN_URL };
 
 use super::error::StdError;
 
-pub async fn show_microsoft_prompt(owner_window: &Window) -> Result<MSAuthToken, StdError> {
+pub async fn show_microsoft_prompt(owner_window: &WebviewWindow) -> Result<MSAuthToken, StdError> {
   // Generate auth link and pkce challenge
   let client = BasicClient::new(
     ClientId::new(MSA_CLIENT_ID.to_string()),
@@ -53,16 +53,14 @@ pub async fn show_microsoft_prompt(owner_window: &Window) -> Result<MSAuthToken,
   // Open window and wait for redirect
   let window = {
     let app_handle = owner_window.app_handle();
-    let mut builder = WindowBuilder::new(&app_handle, "msa_auth", WindowUrl::External(auth_link))
+    WebviewWindowBuilder::new(app_handle, "msa_auth", WebviewUrl::External(auth_link))
       .title("Login with Microsoft")
       .maximizable(false)
       .resizable(false)
       .max_inner_size(500.0, 650.0)
-      .focused(true);
-    if let Ok(hwnd) = owner_window.hwnd() {
-      builder = builder.owner_window(hwnd);
-    }
-    builder.build()?
+      .focused(true)
+      .owner(owner_window)?
+      .build()?
   };
 
   let is_window_closed = Arc::new(Mutex::new(false));
@@ -82,7 +80,7 @@ pub async fn show_microsoft_prompt(owner_window: &Window) -> Result<MSAuthToken,
       break Err(MSAuthError::LoginCancelled);
     }
 
-    let url = window.url();
+    let url = window.url()?;
     if !url.as_str().to_string().starts_with(REDIRECT_URL) {
       continue;
     }
@@ -103,7 +101,7 @@ pub async fn show_microsoft_prompt(owner_window: &Window) -> Result<MSAuthToken,
   // Check CSRF challenge
 
   if state.secret() != csrf_state.secret() {
-    return Err(MSAuthError::CsrfMismatch(state.secret().clone(), csrf_state.secret().clone()))?;
+    Err(MSAuthError::CsrfMismatch(state.secret().clone(), csrf_state.secret().clone()))?;
   }
 
   debug!("Exchanging code for token...");

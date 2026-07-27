@@ -1,6 +1,7 @@
-import { invoke } from "@tauri-apps/api/tauri";
-import { appWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { get, writable } from "svelte/store";
+const appWindow = getCurrentWebviewWindow()
 
 export enum GameStatus {
   Idle = "Idle",

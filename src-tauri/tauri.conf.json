@@ -2,44 +2,30 @@
   "build": {
     "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm build",
-    "devPath": "http://localhost:1420",
-    "distDir": "../dist"
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
   },
-  "package": {
-    "productName": "Gelcorp Launcher"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false
-    },
+  "productName": "Gelcorp Launcher",
+  "plugins": {
     "updater": {
-      "active": true,
-      "dialog": false,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIzRDQ3NDNFRTAwNzY3ODYKUldTR1p3ZmdQblRVSTRHVzNyVHFNY1NkVEY3eGpadHJUSWpkdUhVVnY3bEFQMElkbWcyYnovQWIK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIzRDQ3NDNFRTAwNzY3ODYKUldTR1p3ZmdQblRVSTRHVzNyVHFNY1NkVEY3eGpadHJUSWpkdUhVVnY3bEFQMElkbWcyYnovQWIK",
+      "endpoints": []
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
     },
-    "bundle": {
-      "active": true,
-      "targets": [
-        "nsis",
-        "updater"
-      ],
-      "windows": {
-        "webviewInstallMode": {
-          "type": "embedBootstrapper"
-        }
-      },
-      "identifier": "me.monkeykiller.gelcorp-launcher",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ]
-    },
-    "security": {
-      "csp": null
-    },
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "createUpdaterArtifacts": "v1Compatible"
+  },
+  "mainBinaryName": "Gelcorp Launcher",
+  "identifier": "me.monkeykiller.gelcorp-launcher",
+  "app": {
     "windows": [
       {
         "fullscreen": false,
@@ -48,8 +34,12 @@
         "width": 800,
         "height": 600,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 600,
+        "useHttpsScheme": true
       }
-    ]
+    ],
+    "security": {
+      "csp": null
+    }
   }
 }
