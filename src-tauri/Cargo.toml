@@ -5,7 +5,7 @@ description = "Gelcorp Launcher"
 authors = ["MonkeyKiller"]
 license = ""
 repository = ""
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "gelcorp_launcher_lib"
